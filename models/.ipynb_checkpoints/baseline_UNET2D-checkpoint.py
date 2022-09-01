@@ -26,7 +26,7 @@
 
 
 VERBOSE=False
-##VERBOSE=True
+# VERBOSE=True
 
 __all__ = ['UNet']
 
@@ -41,37 +41,7 @@ from torch.utils.checkpoint import checkpoint
 from torch.nn import functional as F
 
 
-def get_conv(dim=3):
-    """Chooses an implementation for a convolution layer."""
-    if dim == 3:
-        return nn.Conv3d
-    elif dim == 2:
-        return nn.Conv2d
-    else:
-        raise ValueError('dim has to be 2 or 3')
-
-
-def get_convtranspose(dim=3):
-    """Chooses an implementation for a transposed convolution layer."""
-    if dim == 3:
-        return nn.ConvTranspose3d
-    elif dim == 2:
-        return nn.ConvTranspose2d
-    else:
-        raise ValueError('dim has to be 2 or 3')
-
-
-def get_maxpool(dim=3):
-    """Chooses an implementation for a max-pooling layer."""
-    if dim == 3:
-        return nn.MaxPool3d
-    elif dim == 2:
-        return nn.MaxPool2d
-    else:
-        raise ValueError('dim has to be 2 or 3')
-
-
-def get_normalization(normtype: str, num_channels: int, dim: int = 3):
+def get_normalization(normtype: str, num_channels: int):
     """Chooses an implementation for a batch normalization layer."""
     if normtype is None or normtype == 'none':
         return nn.Identity()
@@ -87,19 +57,9 @@ def get_normalization(normtype: str, num_channels: int, dim: int = 3):
             )
         return nn.GroupNorm(num_groups=num_groups, num_channels=num_channels)
     elif normtype == 'instance':
-        if dim == 3:
-            return nn.InstanceNorm3d(num_channels)
-        elif dim == 2:
-            return nn.InstanceNorm2d(num_channels)
-        else:
-            raise ValueError('dim has to be 2 or 3')
+        return nn.InstanceNorm2d(num_channels)
     elif normtype == 'batch':
-        if dim == 3:
-            return nn.BatchNorm3d(num_channels)
-        elif dim == 2:
-            return nn.BatchNorm2d(num_channels)
-        else:
-            raise ValueError('dim has to be 2 or 3')
+        return nn.BatchNorm2d(num_channels)
     else:
         raise ValueError(
             f'Unknown normalization type "{normtype}".\n'
@@ -126,17 +86,8 @@ def planar_pad(x):
 
 
 def conv3(in_channels, out_channels, kernel_size=3, stride=1,
-          padding=1, bias=True, planar=False, dim=3):
-    """Returns an appropriate spatial convolution layer, depending on args.
-    - dim=2: Conv2d with 3x3 kernel
-    - dim=3 and planar=False: Conv3d with 3x3x3 kernel
-    - dim=3 and planar=True: Conv3d with 1x3x3 kernel
-    """
-    if planar:
-        stride = planar_kernel(stride)
-        padding = planar_pad(padding)
-        kernel_size = planar_kernel(kernel_size)
-    return get_conv(dim)(
+          padding=1, bias=True):
+    return nn.Conv2d(
         in_channels,
         out_channels,
         kernel_size=kernel_size,
@@ -145,7 +96,7 @@ def conv3(in_channels, out_channels, kernel_size=3, stride=1,
         bias=bias
     )
 
-def upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3):
+def upconv2(in_channels, out_channels, mode='transpose', planar=False):
     """Returns a learned upsampling operator depending on args."""
     kernel_size = 2
     stride = 2
@@ -153,7 +104,7 @@ def upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3):
         kernel_size = planar_kernel(kernel_size)
         stride = planar_kernel(stride)
     if mode == 'transpose':
-        return get_convtranspose(dim)(
+        return nn.ConvTranspose2d(
             in_channels,
             out_channels,
             kernel_size=kernel_size,
@@ -161,19 +112,18 @@ def upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3):
         )
     elif 'resizeconv' in mode:
         if 'linear' in mode:
-            upsampling_mode = 'trilinear' if dim == 3 else 'bilinear'
+            upsampling_mode = 'bilinear'
         else:
             upsampling_mode = 'nearest'
         rc_kernel_size = 1 if mode.endswith('1') else 3
         return ResizeConv(
-            in_channels, out_channels, planar=planar, dim=dim,
+            in_channels, out_channels, planar=planar,
             upsampling_mode=upsampling_mode, kernel_size=rc_kernel_size
         )
 
 
-def conv1(in_channels, out_channels, dim=3):
-    """Returns a 1x1 or 1x1x1 convolution, depending on dim"""
-    return get_conv(dim)(in_channels, out_channels, kernel_size=1)
+def conv1(in_channels, out_channels):
+    return nn.Conv2d(in_channels, out_channels, kernel_size=1)
 
 
 def get_activation(activation):
@@ -200,29 +150,26 @@ class DownConv(nn.Module):
     A helper Module that performs 2 convolutions and 1 MaxPool.
     A ReLU activation follows each convolution.
     """
-    def __init__(self, in_channels, out_channels, pooling=True, planar=False, activation='relu',
-                 normalization=None, full_norm=True, dim=3, conv_mode='same'):
+    def __init__(self, in_channels, out_channels, pooling=True, activation='relu',
+                 normalization=None, full_norm=True, conv_mode='same'):
         super().__init__()
 
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.pooling = pooling
         self.normalization = normalization
-        self.dim = dim
         padding = 1 if 'same' in conv_mode else 0
 
         self.conv1 = conv3(
-            self.in_channels, self.out_channels, planar=planar, dim=dim, padding=padding
+            self.in_channels, self.out_channels, padding=padding
         )
         self.conv2 = conv3(
-            self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
+            self.out_channels, self.out_channels, padding=padding
         )
 
         if self.pooling:
             kernel_size = 2
-            if planar:
-                kernel_size = planar_kernel(kernel_size)
-            self.pool = get_maxpool(dim)(kernel_size=kernel_size, ceil_mode=True)
+            self.pool = nn.MaxPool2d(kernel_size=kernel_size, ceil_mode=True)
             self.pool_ks = kernel_size
         else:
             self.pool = nn.Identity()
@@ -234,12 +181,12 @@ class DownConv(nn.Module):
         self.act2 = get_activation(activation)
 
         if full_norm:
-            self.norm0 = get_normalization(normalization, self.out_channels, dim=dim)
+            self.norm0 = get_normalization(normalization, self.out_channels)
             if VERBOSE: print("DownConv, full_norm, norm0 =",normalization)
         else:
             self.norm0 = nn.Identity()
             if VERBOSE: print("DownConv, no full_norm")
-        self.norm1 = get_normalization(normalization, self.out_channels, dim=dim)
+        self.norm1 = get_normalization(normalization, self.out_channels)
         if VERBOSE: print("DownConv, norm1 =",normalization)
 
     def forward(self, x):
@@ -327,6 +274,33 @@ def autocrop(from_down: torch.Tensor, from_up: torch.Tensor) -> Tuple[torch.Tens
         ]
     return from_down, from_up
 
+    
+class ConvNActTime(nn.Module):
+    def __init__(self, in_channels, time_channels, out_channels, activation='relu', normalization = None, full_norm=True, conv_mode='same'):
+        super(ConvNActTime, self).__init__()
+        padding = 1 if 'same' in conv_mode else 0
+        self.img_conv = nn.Conv2d(in_channels, out_channels, padding=padding, kernel_size=3)
+        self.time_conv = nn.Conv2d(time_channels, out_channels, padding=padding, kernel_size=3, bias=False)
+        
+        if full_norm:
+            self.norm = get_normalization(normalization, out_channels)
+        else:
+            self.norm = nn.Identity()
+            
+        self.act = get_activation(activation)
+        
+    def forward(self, x, time=None):
+        x = self.img_conv(x)
+#         print(f"image conv shaep:{x.shape}")
+#         print(f"time conv shape:{self.time_conv.weight.shape}")
+#         print(f'time: {time}')
+        if time is not None:
+            f_time = self.time_conv.weight[:, [time]].transpose(0, 1).sum(dim=[-2,-1], keepdim=True)
+#             print(f"TIME conv shaep:{f_time.shape}")
+            x += f_time
+            
+        x = self.norm(x)
+        return self.act(x)
 
 class UpConv(nn.Module):
     """
@@ -337,8 +311,8 @@ class UpConv(nn.Module):
     att: Optional[torch.Tensor]
 
     def __init__(self, in_channels, out_channels,
-                 merge_mode='concat', up_mode='transpose', planar=False,
-                 activation='relu', normalization=None, full_norm=True, dim=3, conv_mode='same',
+                 merge_mode='concat', up_mode='transpose',
+                 activation='relu', normalization=None, full_norm=True, conv_mode='same',
                  attention=False):
         super().__init__()
 
@@ -350,19 +324,19 @@ class UpConv(nn.Module):
         padding = 1 if 'same' in conv_mode else 0
 
         self.upconv = upconv2(self.in_channels, self.out_channels,
-                              mode=self.up_mode, planar=planar, dim=dim)
+                              mode=self.up_mode)
 
         if self.merge_mode == 'concat':
             self.conv1 = conv3(
-                2*self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
+                2*self.out_channels, self.out_channels, padding=padding
             )
         else:
             # num of input channels to conv2 is same
             self.conv1 = conv3(
-                self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
+                self.out_channels, self.out_channels, padding=padding
             )
         self.conv2 = conv3(
-            self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
+            self.out_channels, self.out_channels, padding=padding
         )
 
         self.act0 = get_activation(activation)
@@ -370,15 +344,15 @@ class UpConv(nn.Module):
         self.act2 = get_activation(activation)
 
         if full_norm:
-            self.norm0 = get_normalization(normalization, self.out_channels, dim=dim)
-            self.norm1 = get_normalization(normalization, self.out_channels, dim=dim)
+            self.norm0 = get_normalization(normalization, self.out_channels)
+            self.norm1 = get_normalization(normalization, self.out_channels)
         else:
             self.norm0 = nn.Identity()
             self.norm1 = nn.Identity()
-        self.norm2 = get_normalization(normalization, self.out_channels, dim=dim)
+        self.norm2 = get_normalization(normalization, self.out_channels)
         if attention:
             self.attention = GridAttention(
-                in_channels=in_channels // 2, gating_channels=in_channels, dim=dim
+                in_channels=in_channels // 2, gating_channels=in_channels
             )
         else:
             self.attention = DummyAttention()
@@ -420,14 +394,11 @@ class ResizeConv(nn.Module):
     - https://distill.pub/2016/deconv-checkerboard/
     - https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/issues/190
     """
-    def __init__(self, in_channels, out_channels, kernel_size=3, planar=False, dim=3,
+    def __init__(self, in_channels, out_channels, kernel_size=3,
                  upsampling_mode='nearest'):
         super().__init__()
         self.upsampling_mode = upsampling_mode
         self.scale_factor = 2
-        if dim == 3 and planar:  # Only interpolate (H, W) dims, leave D as is
-            self.scale_factor = planar_kernel(self.scale_factor)
-        self.dim = dim
         self.upsample = nn.Upsample(scale_factor=self.scale_factor, mode=self.upsampling_mode)
         # TODO: Investigate if 3x3 or 1x1 conv makes more sense here and choose default accordingly
         # Preliminary notes:
@@ -441,10 +412,9 @@ class ResizeConv(nn.Module):
         # --> Needs empirical evaluation
         if kernel_size == 3:
             self.conv = conv3(
-                in_channels, out_channels, padding=1, planar=planar, dim=dim
-            )
+                in_channels, out_channels, padding=1)
         elif kernel_size == 1:
-            self.conv = conv1(in_channels, out_channels, dim=dim)
+            self.conv = conv1(in_channels, out_channels)
         else:
             raise ValueError(f'kernel_size={kernel_size} is not supported. Choose 1 or 3.')
 
@@ -456,10 +426,10 @@ class GridAttention(nn.Module):
     """Based on https://github.com/ozan-oktay/Attention-Gated-Networks
 
     Published in https://arxiv.org/abs/1804.03999"""
-    def __init__(self, in_channels, gating_channels, inter_channels=None, dim=3, sub_sample_factor=2):
+    def __init__(self, in_channels, gating_channels, inter_channels=None,sub_sample_factor=2):
         super().__init__()
 
-        assert dim in [2, 3]
+        dim = 2
 
         # Downsampling rate for the input featuremap
         if isinstance(sub_sample_factor, tuple): self.sub_sample_factor = sub_sample_factor
@@ -467,7 +437,6 @@ class GridAttention(nn.Module):
         else: self.sub_sample_factor = tuple([sub_sample_factor]) * dim
 
         # Default parameter set
-        self.dim = dim
         self.sub_sample_kernel_size = self.sub_sample_factor
 
         # Number of channels (pixel dimensions)
@@ -480,16 +449,10 @@ class GridAttention(nn.Module):
             if self.inter_channels == 0:
                 self.inter_channels = 1
 
-        if dim == 3:
-            conv_nd = nn.Conv3d
-            bn = nn.BatchNorm3d
-            self.upsample_mode = 'trilinear'
-        elif dim == 2:
-            conv_nd = nn.Conv2d
-            bn = nn.BatchNorm2d
-            self.upsample_mode = 'bilinear'
-        else:
-            raise NotImplementedError
+        
+        conv_nd = nn.Conv2d
+        bn = nn.BatchNorm2d
+        self.upsample_mode = 'bilinear'
 
         # Output transform
         self.w = nn.Sequential(
@@ -757,7 +720,8 @@ class UNet(nn.Module):
     def __init__(
             self,
             in_channels: int = 11,
-            out_channels: int = 32,  ## NEW: number of time slots to predict
+            out_channels: int = 1,  ## NEW: number of time slots to predict
+            time_channels: int = 32,
             n_blocks: int = 5,
             start_filts: int = 32,
             up_mode: str = 'transpose',
@@ -768,7 +732,6 @@ class UNet(nn.Module):
             activation: Union[str, nn.Module] = 'relu',
             normalization: str = 'batch',
             full_norm: bool = True,
-            dim: int = 3,
             conv_mode: str = 'same',
     ):
         super().__init__()
@@ -776,14 +739,7 @@ class UNet(nn.Module):
         if n_blocks < 1:
             raise ValueError('n_blocks must be > 1.')
 
-        if dim not in {2, 3}:
-            raise ValueError('dim has to be 2 or 3')
-        if dim == 2 and planar_blocks != ():
-            raise ValueError(
-                'If dim=2, you can\'t use planar_blocks since everything will '
-                'be planar (2-dimensional) anyways.\n'
-                'Either set dim=3 or set planar_blocks=().'
-            )
+
         if up_mode in ('transpose', 'upsample', 'resizeconv_nearest', 'resizeconv_linear',
                        'resizeconv_nearest1', 'resizeconv_linear1'):
             self.up_mode = up_mode
@@ -816,6 +772,7 @@ class UNet(nn.Module):
             )
 
         self.out_channels = out_channels
+        self.time_channels = time_channels
         self.in_channels = in_channels
         self.start_filts = start_filts
         self.n_blocks = n_blocks
@@ -823,7 +780,6 @@ class UNet(nn.Module):
         self.attention = attention
         self.conv_mode = conv_mode
         self.activation = activation
-        self.dim = dim
 
         self.down_convs = nn.ModuleList()
         self.up_convs = nn.ModuleList()
@@ -838,6 +794,8 @@ class UNet(nn.Module):
         # to save resources
         self.planar_blocks = planar_blocks
 
+        
+        self.init_conv = ConvNActTime(in_channels, time_channels, in_channels, activation, normalization, full_norm, conv_mode)
         # create the encoder pathway and add to a list
         for i in range(n_blocks):
             ins = self.in_channels if i == 0 else outs
@@ -849,11 +807,9 @@ class UNet(nn.Module):
                 ins,
                 outs,
                 pooling=pooling,
-                planar=planar,
                 activation=activation,
                 normalization=normalization,
                 full_norm=full_norm,
-                dim=dim,
                 conv_mode=conv_mode,
             )
             self.down_convs.append(down_conv)
@@ -870,17 +826,16 @@ class UNet(nn.Module):
                 outs,
                 up_mode=up_mode,
                 merge_mode=merge_mode,
-                planar=planar,
                 activation=activation,
                 normalization=normalization,
                 attention=attention,
                 full_norm=full_norm,
-                dim=dim,
                 conv_mode=conv_mode,
             )
             self.up_convs.append(up_conv)
-        self.reduce_channels = conv1(outs*4, ## 4= experiment / len_seq_in
-                                     self.out_channels, dim=dim)
+        # original outs = 32
+        self.reduce_channels = conv1(outs, ## 4= experiment / len_seq_in
+                                     self.out_channels)
         self.dropout = nn.Dropout3d(0.4)  ## read this from config!
         self.apply(self.weight_init)
 
@@ -893,9 +848,11 @@ class UNet(nn.Module):
             if getattr(m, 'bias') is not None:
                 nn.init.constant_(m.bias, 0)
 
-    def forward(self, x):
+    def forward(self, x, lead):
+        x = self.init_conv(x, lead)
+        
         encoder_outs = []
-
+        
         # Encoder pathway, save outputs for merging
         i = 0  # Can't enumerate because of https://github.com/pytorch/pytorch/issues/16123
         for module in self.down_convs:
@@ -915,12 +872,13 @@ class UNet(nn.Module):
         # No softmax is used, so you need to apply it in the loss.
         if VERBOSE: print("pre-reshape",x.shape)
         xs = x.shape;
-        x = torch.reshape(x,(xs[0],xs[1]*xs[2],1,xs[3],xs[4]));
+        
+#         x = torch.reshape(x,(xs[0],xs[1]*xs[2],1,xs[3],xs[4])); # batch, 11, 4, x, y -> batch, 44, x, y
         if VERBOSE: print("pre-reduce",x.shape)
         x = self.reduce_channels(x)
         if VERBOSE: print("post-reduce",x.shape)
         xs = x.shape;
-        x = torch.reshape(x,(xs[0],1,xs[1],xs[3],xs[4]));
+        x = torch.reshape(x,(xs[0],xs[1],xs[2],xs[3]));
         if VERBOSE: print("post-reshape",x.shape)
             # Uncomment the following line to temporarily store output for
         #  receptive field estimation using fornoxai/receptivefield:
@@ -954,7 +912,6 @@ def test_model(
     n_blocks=3,
     planar_blocks=(),
     merge_mode='concat',
-    dim=3
 ):
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     model = UNet(
@@ -963,48 +920,29 @@ def test_model(
         n_blocks=n_blocks,
         planar_blocks=planar_blocks,
         merge_mode=merge_mode,
-        dim=dim,
     ).to(device)
 
     # Minimal test input
-    if dim == 3:
-        # Each block in the encoder pathway ends with 2x2x2 downsampling, except
-        # planar blocks, which only do 1x2x2 downsampling, so the input has to
-        # be larger when using more blocks.
-        x = torch.randn(
-            batch_size,
-            in_channels,
-            2 ** n_blocks // (2 ** len(planar_blocks)),
-            2 ** n_blocks,
-            2 ** n_blocks,
-            device=device
-        )
-        expected_out_shape = (
-            batch_size,
-            out_channels,
-            2 ** n_blocks // (2 ** len(planar_blocks)),
-            2 ** n_blocks,
-            2 ** n_blocks
-        )
-    elif dim == 2:
-        # Each block in the encoder pathway ends with 2x2 downsampling
-        # so the input has to be larger when using more blocks.
-        x = torch.randn(
-            batch_size,
-            in_channels,
-            2 ** n_blocks,
-            2 ** n_blocks,
-            device=device
-        )
-        expected_out_shape = (
-            batch_size,
-            out_channels,
-            2 ** n_blocks,
-            2 ** n_blocks
-        )
+
+
+    # Each block in the encoder pathway ends with 2x2 downsampling
+    # so the input has to be larger when using more blocks.
+    x = torch.randn(
+        batch_size,
+        in_channels,
+        2 ** n_blocks,
+        2 ** n_blocks,
+        device=device
+    )
+    expected_out_shape = (
+        batch_size,
+        out_channels,
+        2 ** n_blocks,
+        2 ** n_blocks
+    )
 
     # Test forward, autograd, and backward pass with test input
-    out = model(x)
+    out = model(x, 0)
     loss = torch.sum(out)
     loss.backward()
     assert out.shape == expected_out_shape
@@ -1013,7 +951,7 @@ def test_model(
 def test_2d_config(max_n_blocks=4):
     for n_blocks in range(1, max_n_blocks + 1):
         print(f'Testing 2D U-Net with n_blocks = {n_blocks}...')
-        test_model(n_blocks=n_blocks, dim=2)
+        test_model(n_blocks=n_blocks)
 
 
 def test_planar_configs(max_n_blocks=4):

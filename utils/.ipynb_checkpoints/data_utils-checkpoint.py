@@ -86,8 +86,6 @@ def generate_and_cache_sequences(split, splits_df, len_seq_in, len_seq_predict, 
     qq = samples.copy()
     with open(path_name, 'wb') as f:
         pickle.dump(qq, f)
-#     print(f'!!!!!!!!!!!!!!{split} dataset indices length: {len(samples[split])}, first 10 indicees: {samples[split][:10]}')
-    # idx -> [[input indices], [predict indices], region]
     return samples[split]
 
 def read_samples_ids(path, data_split):
@@ -309,9 +307,10 @@ def get_sequence(seq, root, data_split, region, product, bands, preprocess=None,
     mask_seq = np.asarray(mask_seq)
 
     # Swapping Axes to give shape  channels x time x width x height 
-    if swap_time_ch:
-        prod_seq = np.swapaxes(prod_seq, 0, 1)
-        mask_seq = np.swapaxes(mask_seq, 0, 1)
+    prod_seq = np.swapaxes(prod_seq, 0, 1)
+    mask_seq = np.swapaxes(mask_seq, 0, 1)
+    
+    prod_seq = prod_seq.reshape(prod_seq.shape[0]*prod_seq.shape[1],prod_seq.shape[2],prod_seq.shape[3])
     return np.array(prod_seq), mask_seq
 
 def get_file(sample_id, root, data_split, region, product, bands, preprocess=None, ds=None):
@@ -729,22 +728,3 @@ def tensor_to_submission_file(predictions, predict_params):
     h5f.create_dataset('submission', data=predictions.squeeze())
     h5f.close()
 
-def mixup_data(x, y, alpha=1.0, use_cuda=True):
-    '''Returns mixed inputs, pairs of targets, and lambda'''
-    if alpha > 0:
-        lam = np.random.beta(alpha, alpha)
-    else:
-        lam = 1
-
-    batch_size = x.size()[0]
-    if use_cuda:
-        index = torch.randperm(batch_size).cuda()
-    else:
-        index = torch.randperm(batch_size)
-
-    mixed_x = lam * x + (1 - lam) * x[index, :]
-    y_a, y_b = y, y[index]
-    return mixed_x, y_a, y_b, lam
-
-def mixup_criterion(criterion, pred, y_a, y_b, lam):
-    return lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b)

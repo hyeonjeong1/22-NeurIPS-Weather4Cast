@@ -233,7 +233,7 @@ if __name__ == "__main__":
     """ examples of usage:
 
     1) train from scratch on one GPU
-    python train.py --gpus 1 3 4 --mode train --config_path config_baseline.yaml --name baseline_train
+    python train.py --gpus 5 6 7 --mode train --config_path config_baseline.yaml --name baseline_train
 
     2) train from scratch on four GPUs
     python train.py --gpus 0 1 2 3 --mode train --config_path config_baseline.yaml --name baseline_train
@@ -252,7 +252,12 @@ if __name__ == "__main__":
     
     """
     
+    5D
     input shape: torch.Size([16, 11, 4, 252, 252]), label shape: torch.Size([16, 1, 32, 252, 252])
     BATCH X CHANNEL X TIME X IMG SIZE
+    
+    4D
+    input shape: 
+    BATCh X (CANNEL 1 + CHANNEL 2 + ... + CHANNEL 11)
     
     """

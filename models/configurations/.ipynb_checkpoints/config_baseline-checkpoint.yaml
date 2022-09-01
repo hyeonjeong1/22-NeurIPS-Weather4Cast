@@ -13,7 +13,7 @@ dataset:
   input_product: REFL-BT 
   output_product: RATE 
   out_channels: 1 
-  in_channels: 11
+  in_channels: 44
   swap_time_ch: True #swap the time and channels axis - if set to False (B, T, C, H, W)
   full_opera_context: 1512 # (105+42+105)*6; 
   size_target_center:  252 # 42*6;  
@@ -104,7 +104,7 @@ dataset:
       standardise: True
     
 train:    # model training settings
-  batch_size: 44
+  batch_size: 8
   max_epochs: 90
   n_workers: 16  # 8
   loss: BCEWithLogitsLoss
@@ -114,12 +114,13 @@ train:    # model training settings
   lr: 1e-4
   weight_decay: 2e-2 
   init_filter_size: 32
-  mixup: mixup
+  mixup: False
   alpha: 0.2
   cutmix_p: 1.0
+  dimension: 2
 model:    # model definition settings
   model_name: 3D_UNET_base
-  in_channels: 11  
+  in_channels: 44  
   gradient_clip_val: 2.0
   gradient_clip_algorithm: value
 
