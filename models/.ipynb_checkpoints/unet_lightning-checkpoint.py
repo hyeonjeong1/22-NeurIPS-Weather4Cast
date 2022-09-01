@@ -28,6 +28,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from utils.evaluate import *        
 from torch.autograd import Variable
+import numpy as np
 # from utils.data_utils import mixup_data, mixup_criterion
 
 #models
@@ -57,6 +58,7 @@ class UNet_Lightning(pl.LightningModule):
         
         self.mixup = params['mixup']
         self.alpha = params['alpha']
+        self.cutmix_prob = params['cutmix_p']
 
         pos_weight = torch.tensor(params['pos_weight']);
         if VERBOSE: print("Positive weight:",pos_weight);
@@ -128,7 +130,6 @@ class UNet_Lightning(pl.LightningModule):
         return loss
     
     def mixup_data(self, x, y, metadata, alpha=1.0):
-#     def mixup_data(x, y, metadata, alpha=1.0, use_cuda=True):
         '''Returns mixed inputs, pairs of targets, and lambda'''
         if alpha > 0:
             lam = np.random.beta(alpha, alpha)
@@ -137,15 +138,40 @@ class UNet_Lightning(pl.LightningModule):
 
         batch_size = x.size()[0]
         index = torch.randperm(batch_size)
-#         if use_cuda:
-#             index = torch.randperm(batch_size).cuda()
-#         else:
-#             index = torch.randperm(batch_size)
 
         mixed_x = lam * x + (1 - lam) * x[index]
         y_a, y_b = y, y[index]
         metadata['target']['mask'] = metadata['target']['mask'] | metadata['target']['mask'][index]
         return mixed_x, y_a, y_b, metadata, lam
+    
+    def cutmix_data(self,x, y, metadata, alpha=1.0):
+        if alpha > 0:
+            lam = np.random.beta(alpha, alpha)
+        else:
+            lam = 1            
+            
+        W = x.size()[2]
+        H = x.size()[3]
+        cut_rat = np.sqrt(1. - lam)
+        cut_w = np.int(W * cut_rat)
+        cut_h = np.int(H * cut_rat)
+
+        # uniform
+        cx = np.random.randint(W)
+        cy = np.random.randint(H)
+
+        bbx1 = np.clip(cx - cut_w // 2, 0, W)
+        bby1 = np.clip(cy - cut_h // 2, 0, H)
+        bbx2 = np.clip(cx + cut_w // 2, 0, W)
+        bby2 = np.clip(cy + cut_h // 2, 0, H)
+        
+        batch_size = x.size()[0]
+        index = torch.randperm(batch_size)
+        x[:, :, bbx1:bbx2, bby1:bby2] = x[index, :, bbx1:bbx2, bby1:bby2]
+        y[:, :, bbx1:bbx2, bby1:bby2] = y[index, :, bbx1:bbx2, bby1:bby2]
+        metadata['target']['mask'][:, :, bbx1:bbx2, bby1:bby2] = metadata['target']['mask'][index, :, bbx1:bbx2, bby1:bby2]
+        
+        return x, y, metadata
     
     def _mixup_criterion(self, y_hat, y_a, y_b, lam, agg=True, mask=None):
         if agg:
@@ -159,27 +185,26 @@ class UNet_Lightning(pl.LightningModule):
         x, y, metadata  = batch
         y_a, y_b, lam = None, None, None
         
-        if self.mixup:
-            x, y_a, y_b, metadata, lam = self.mixup_data(x, y, metadata, self.alpha)
-            tmp = y_a - y_b
-            x, y_a, y_b = map(Variable, (x, y_a, y_b))
+        r = np.random.rand(1)
             
-#         print(f"input shape: {x.shape}, label shape: {y.shape}")
+        if self.mixup == 'mixup':
+            x, y_a, y_b, metadata, lam = self.mixup_data(x, y, metadata, self.alpha)
+            x, y_a, y_b = map(Variable, (x, y_a, y_b))
+        elif self.mixup == 'cutmix' and r < self.cutmix_prob:
+            x, y, metadata = self.cutmix_data(x, y, metadata, self.alpha)
+        
         if VERBOSE:
             print('x', x.shape, 'y', y.shape, '----------------- batch')
         y_hat = self.forward(x)
         if VERBOSE:
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
         mask = self.get_target_mask(metadata)
-        if self.mixup:
+        if self.mixup == 'mixup':
             loss = self._mixup_criterion(y_hat, y_a, y_b, lam, mask=mask)
-        else:
+        else: # cutmix also uses this loss function
             loss = self._compute_loss(y_hat, y, mask=mask)
-        #recall, precision, F1, acc = recall_precision_f1_acc(y, y_hat)
-        #LOGGINGx
-        #values = {'{phase}_loss': loss, '{phase}_acc': acc, '{phase}_recall': recall, '{phase}_precision': precision, 'F1': F1}
+            
         self.log(f'{phase}_loss', loss,batch_size=self.bs)
-        #self.log_dict(values, batch_size=self.bs)
         return loss
                 
     def validation_step(self, batch, batch_idx, phase='val'):

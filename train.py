@@ -231,7 +231,7 @@ if __name__ == "__main__":
     """ examples of usage:
 
     1) train from scratch on one GPU
-    python train.py --gpus 6 7 --mode train --config_path config_baseline.yaml --name baseline_train
+    python train.py --gpus 1 3 4 --mode train --config_path config_baseline.yaml --name baseline_train
 
     2) train from scratch on four GPUs
     python train.py --gpus 0 1 2 3 --mode train --config_path config_baseline.yaml --name baseline_train
@@ -241,7 +241,7 @@ if __name__ == "__main__":
     
     4) evaluate a trained model from a checkpoint on two GPUs
     python train.py --gpus 0 1 --mode val  --config_path config_baseline.yaml  --checkpoint "lightning_logs/PATH-TO-YOUR-MODEL-LOGS/checkpoints/YOUR-CHECKPOINT-FILENAME.ckpt" --name baseline_validate
-    python train.py --gpus 6 7 --mode val  --config_path config_baseline.yaml  --checkpoint "lightning_logs/baseline/baseline_train_0826-09:02/checkpoints/epoch=27-val_loss_epoch=0.802378.ckpt" --name baseline_validate
+    python train.py --gpus 6 7 --mode val  --config_path config_baseline.yaml  --checkpoint "lightning_logs/baseline/baseline_train_0830-05:22/checkpoints/epoch=27-val_loss_epoch=0.789238.ckpt" --name baseline_validate
 
     5) generate predictions (plese note that this mode works only for one GPU)
     python train.py --gpus 1 --mode predict  --config_path config_baseline.yaml  --checkpoint "lightning_logs/PATH-TO-YOUR-MODEL-LOGS/checkpoints/YOUR-CHECKPOINT-FILENAME.ckpt"

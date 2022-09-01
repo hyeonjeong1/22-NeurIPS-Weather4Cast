@@ -104,7 +104,7 @@ dataset:
       standardise: True
     
 train:    # model training settings
-  batch_size: 24
+  batch_size: 44
   max_epochs: 90
   n_workers: 16  # 8
   loss: BCEWithLogitsLoss
@@ -114,8 +114,9 @@ train:    # model training settings
   lr: 1e-4
   weight_decay: 2e-2 
   init_filter_size: 32
-  mixup: True
+  mixup: mixup
   alpha: 0.2
+  cutmix_p: 1.0
 model:    # model definition settings
   model_name: 3D_UNET_base
   in_channels: 11  
