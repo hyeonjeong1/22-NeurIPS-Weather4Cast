@@ -144,27 +144,27 @@ def get_activation(activation):
         # Deep copy is necessary in case of paremtrized activations
         return copy.deepcopy(activation)
 
-
 class DownConv(nn.Module):
     """
     A helper Module that performs 2 convolutions and 1 MaxPool.
     A ReLU activation follows each convolution.
     """
-    def __init__(self, in_channels, out_channels, pooling=True, activation='relu',
+    def __init__(self, in_channels, time_channels, out_channels, pooling=True, activation='relu',
                  normalization=None, full_norm=True, conv_mode='same'):
         super().__init__()
 
         self.in_channels = in_channels
+        self.time_channels = time_channels
         self.out_channels = out_channels
         self.pooling = pooling
         self.normalization = normalization
         padding = 1 if 'same' in conv_mode else 0
 
-        self.conv1 = conv3(
-            self.in_channels, self.out_channels, padding=padding
+        self.conv1 = ConvTime(
+            self.in_channels, self.time_channels, self.out_channels, activation, normalization, full_norm, conv_mode
         )
-        self.conv2 = conv3(
-            self.out_channels, self.out_channels, padding=padding
+        self.conv2 = ConvTime(
+            self.out_channels, self.time_channels, self.out_channels, activation, normalization, full_norm, conv_mode
         )
 
         if self.pooling:
@@ -275,9 +275,9 @@ def autocrop(from_down: torch.Tensor, from_up: torch.Tensor) -> Tuple[torch.Tens
     return from_down, from_up
 
     
-class ConvNActTime(nn.Module):
-    def __init__(self, in_channels, time_channels, out_channels, activation='relu', normalization = None, full_norm=True, conv_mode='same'):
-        super(ConvNActTime, self).__init__()
+class ConvTime(nn.Module):
+    def __init__(self, in_channels, time_channels, out_channels, activation='relu', normalization = None, full_norm=True, conv_mode='same', init=False):
+        super(ConvTime, self).__init__()
         padding = 1 if 'same' in conv_mode else 0
         self.img_conv = nn.Conv2d(in_channels, out_channels, padding=padding, kernel_size=3)
         self.time_conv = nn.Conv2d(time_channels, out_channels, padding=padding, kernel_size=3, bias=False)
@@ -288,6 +288,7 @@ class ConvNActTime(nn.Module):
             self.norm = nn.Identity()
             
         self.act = get_activation(activation)
+        self.init = init
         
     def forward(self, x, time=None):
         x = self.img_conv(x)
@@ -298,9 +299,12 @@ class ConvNActTime(nn.Module):
             f_time = self.time_conv.weight[:, [time]].transpose(0, 1).sum(dim=[-2,-1], keepdim=True)
 #             print(f"TIME conv shaep:{f_time.shape}")
             x += f_time
+    
+        if self.init:
+            x = self.norm(x)
+            x = self.act(x)
             
-        x = self.norm(x)
-        return self.act(x)
+        return x
 
 class UpConv(nn.Module):
     """
@@ -310,7 +314,7 @@ class UpConv(nn.Module):
 
     att: Optional[torch.Tensor]
 
-    def __init__(self, in_channels, out_channels,
+    def __init__(self, in_channels, time_channels, out_channels,
                  merge_mode='concat', up_mode='transpose',
                  activation='relu', normalization=None, full_norm=True, conv_mode='same',
                  attention=False):
@@ -327,16 +331,16 @@ class UpConv(nn.Module):
                               mode=self.up_mode)
 
         if self.merge_mode == 'concat':
-            self.conv1 = conv3(
-                2*self.out_channels, self.out_channels, padding=padding
+            self.conv1 = ConvTime(
+                2*self.out_channels, time_channels, self.out_channels, activation, normalization, full_norm, conv_mode
             )
         else:
             # num of input channels to conv2 is same
-            self.conv1 = conv3(
-                self.out_channels, self.out_channels, padding=padding
+            self.conv1 = ConvTime(
+                self.out_channels, time_channels, self.out_channels, activation, normalization, full_norm, conv_mode
             )
-        self.conv2 = conv3(
-            self.out_channels, self.out_channels, padding=padding
+        self.conv2 = ConvTime(
+            self.out_channels, time_channels, self.out_channels, activation, normalization, full_norm, conv_mode
         )
 
         self.act0 = get_activation(activation)
@@ -795,7 +799,7 @@ class UNet(nn.Module):
         self.planar_blocks = planar_blocks
 
         
-        self.init_conv = ConvNActTime(in_channels, time_channels, in_channels, activation, normalization, full_norm, conv_mode)
+        self.init_conv = ConvTime(in_channels, time_channels, in_channels, activation, normalization, full_norm, conv_mode, init=True)
         # create the encoder pathway and add to a list
         for i in range(n_blocks):
             ins = self.in_channels if i == 0 else outs
@@ -805,6 +809,7 @@ class UNet(nn.Module):
 
             down_conv = DownConv(
                 ins,
+                time_channels,
                 outs,
                 pooling=pooling,
                 activation=activation,
@@ -823,6 +828,7 @@ class UNet(nn.Module):
 
             up_conv = UpConv(
                 ins,
+                time_channels,
                 outs,
                 up_mode=up_mode,
                 merge_mode=merge_mode,
