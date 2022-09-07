@@ -86,6 +86,7 @@ def write_temporal_recall_precision_f1_acc(y, y_hat, time_dim, test=False):
     
 #     [16, 32, 252, 252]
     for i in range(time_dim):
+      if int(i)%4==3:
         cm = get_confusion_matrix(y[:, i, :, :].ravel(), y_hat[:, i, :, :].ravel())
         if len(cm)==4:
             tn, fp, fn, tp = cm
