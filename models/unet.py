@@ -26,7 +26,7 @@
 
 
 VERBOSE=False
-# VERBOSE=True
+##VERBOSE=True
 
 __all__ = ['UNet']
 
@@ -144,6 +144,7 @@ def conv3(in_channels, out_channels, kernel_size=3, stride=1,
         padding=padding,
         bias=bias
     )
+
 
 def upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3):
     """Returns a learned upsampling operator depending on args."""
@@ -730,6 +731,7 @@ class UNet(nn.Module):
                 have reduced sizes especially in deeper layers.
               - No "fake" data (that is, the zeros from the SAME-padding)
                 is fed into the network. The output regions that are influenced
+                by zero-padding naturally have worse quality, so they should
                 be removed in post-processing if possible (see
                 ``overlap_shape`` in :py:mod:`elektronn3.inference`).
                 Using VALID convolutions prevents the unnecessary computation

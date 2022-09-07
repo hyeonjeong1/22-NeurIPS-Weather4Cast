@@ -47,7 +47,7 @@ class RainData(Dataset):
                  size_target_center=None,full_opera_context=None,
                  preprocess_HRIT=None, path_to_sample_ids='',
                  len_seq_in=4, len_seq_predict=32,
-                 regions=['boxi_0015'], regions_def={}, generate_samples=False,
+                 regions=[], regions_def={}, generate_samples=False,
                  latlon_path='', altitudes_path='', 
                  splits_path=None, swap_time_ch=False,
                  **kwargs):

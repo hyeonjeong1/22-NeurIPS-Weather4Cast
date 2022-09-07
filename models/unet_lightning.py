@@ -76,24 +76,24 @@ class UNet_Lightning(pl.LightningModule):
             f"============== loss: {self.loss} | weight: {pos_weight} (if using BCEwLL)"
         print(t)
         
-        self.valid_log = []
-        self.valid_cf = []
-        for i in range(1,self.start_filts+1):
-            self.valid_log.append(open(f'./logs/valid_{i}h.log',"w"))
-            self.valid_cf.append(open(f'./logs/valid_cf_{i}h.log',"w"))
-            self.valid_log[i-1].write('recall\tprecision\tf1\tcsi\tacc')
-            self.valid_log[i-1].flush()
-            self.valid_cf[i-1].write('tn\tf\nfp\ntp')
-            self.valid_cf[i-1].flush()
-        self.test_log = []
-        self.test_cf = []
-        for i in range(1,self.start_filts+1):
-            self.test_log.append(open(f'./logs/test_{i}h.log',"w"))
-            self.test_cf.append(open(f'./logs/test_cf_{i}h.log',"w"))
-            self.test_log[i-1].write('recall\tprecision\tf1\tcsi\tacc')
-            self.test_log[i-1].flush()
-            self.test_cf[i-1].write('tn\tf\nfp\ntp')
-            self.test_cf[i-1].flush()
+        # self.valid_log = []
+        # self.valid_cf = []
+        # for i in range(1,self.start_filts+1):
+        #     self.valid_log.append(open(f'./logs/valid_{i}h.log',"w"))
+        #     self.valid_cf.append(open(f'./logs/valid_cf_{i}h.log',"w"))
+        #     self.valid_log[i-1].write('recall\tprecision\tf1\tcsi\tacc')
+        #     self.valid_log[i-1].flush()
+        #     self.valid_cf[i-1].write('tn\tf\nfp\ntp')
+        #     self.valid_cf[i-1].flush()
+        # self.test_log = []
+        # self.test_cf = []
+        # for i in range(1,self.start_filts+1):
+        #     self.test_log.append(open(f'./logs/test_{i}h.log',"w"))
+        #     self.test_cf.append(open(f'./logs/test_cf_{i}h.log',"w"))
+        #     self.test_log[i-1].write('recall\tprecision\tf1\tcsi\tacc')
+        #     self.test_log[i-1].flush()
+        #     self.test_cf[i-1].write('tn\tf\nfp\ntp')
+        #     self.test_cf[i-1].flush()
     
     def on_fit_start(self):
         """ create a placeholder to save the results of the metric per variable """
@@ -231,13 +231,14 @@ class UNet_Lightning(pl.LightningModule):
             y_hat[~idx_gt0] = 0
 #         y shape: torch.Size([16, 1, 32, 252, 252]), y_hat shape: torch.Size([16, 1, 32, 252, 252])
         recall, precision, F1, acc, csi = recall_precision_f1_acc(y, y_hat)
-        logs = write_temporal_recall_precision_f1_acc(y.squeeze(), y_hat.squeeze(),self.start_filts)
+        if self.params['logging']:
+          logs = write_temporal_recall_precision_f1_acc(y.squeeze(), y_hat.squeeze(),self.start_filts)
         
-        for i in range(self.start_filts):
-            self.valid_log[i].write(logs['log'][i])
-            self.valid_cf[i].write(logs['cf'][i])
-            self.valid_log[i].flush()
-            self.valid_cf[i].flush()
+        # for i in range(self.start_filts):
+        #     self.valid_log[i].write(logs['log'][i])
+        #     self.valid_cf[i].write(logs['cf'][i])
+        #     self.valid_log[i].flush()
+        #     self.valid_cf[i].flush()
             
         iou = iou_class(y_hat, y)
 
@@ -272,13 +273,14 @@ class UNet_Lightning(pl.LightningModule):
             y_hat[~idx_gt0] = 0
         
         recall, precision, F1, acc, csi = recall_precision_f1_acc(y, y_hat)
-        logs=write_temporal_recall_precision_f1_acc(y.squeeze(), y_hat.squeeze(),self.start_filts)
-        for i in range(self.start_filts):
-            self.test_log[i].write(logs['log'][i])
-            self.test_cf[i].write(logs['cf'][i])
+        if self.params['logging']:
+          logs=write_temporal_recall_precision_f1_acc(y.squeeze(), y_hat.squeeze(),self.start_filts, test=True)
+        # for i in range(self.start_filts):
+        #     self.test_log[i].write(logs['log'][i])
+        #     self.test_cf[i].write(logs['cf'][i])
             
-            self.test_log[i].flush()
-            self.test_cf[i].flush()
+        #     self.test_log[i].flush()
+        #     self.test_cf[i].flush()
             
         iou = iou_class(y_hat, y)
 

@@ -32,6 +32,7 @@ from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 import datetime
 import os
 import torch 
+import wandb
 
 from models.unet_lightning import UNet_Lightning as UNetModel
 from utils.data_utils import load_config
@@ -144,12 +145,18 @@ def do_test(trainer, model, test_data):
 def train(params, gpus, mode, checkpoint_path, model=UNetModel): 
     """ main training/evaluation method
     """
+    # wandb
+    if params['logging']:
+      wandb.init(project=params['model']['model_name'], name=params['experiment']['name'],  entity="w4c")
+    
     # ------------
     # model & data
     # ------------
     get_cuda_memory_usage(gpus)
     data = DataModule(params['dataset'], params['train'], mode)
     model = load_model(model, params, checkpoint_path)
+    if params['logging']:
+      wandb.watch(model)
     # ------------
     # Add your models here
     # ------------
@@ -200,6 +207,8 @@ def update_params_based_on_args(options):
     if options.name != '':
         print(params['experiment']['name'])
         params['experiment']['name'] = options.name
+    
+    params['logging'] = options.logging
     return params
     
 def set_parser():
@@ -216,6 +225,8 @@ def set_parser():
                         help="init a model from a checkpoint path. '' as default (random weights)")
     parser.add_argument("-n", "--name", type=str, required=False, default='', 
                          help="Set the name of the experiment")
+    parser.add_argument("-l", "--logging", action='store_true',
+                        help="wandb logging true or not")
 
     return parser
 

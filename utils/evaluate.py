@@ -24,6 +24,7 @@
 from sklearn.metrics import confusion_matrix
 import numpy as np
 import torch as t
+import wandb
 
 def get_confusion_matrix(y_true, y_pred): 
     """get confusion matrix from y_true and y_pred
@@ -77,7 +78,7 @@ def recall_precision_f1_acc(y, y_hat):
 
     return recall, precision, F1, acc, csi
 
-def write_temporal_recall_precision_f1_acc(y, y_hat, time_dim):
+def write_temporal_recall_precision_f1_acc(y, y_hat, time_dim, test=False):
     y, y_hat = [o.cpu() for o in [y, y_hat]]
     y, y_hat = [np.asarray(o) for o in [y, y_hat]]
     
@@ -104,8 +105,12 @@ def write_temporal_recall_precision_f1_acc(y, y_hat, time_dim):
 
             acc = (tn + tp) / (tn+fp+fn+tp)
         
-            logs['log'].append(f'{recall}\t{precision}\t{F1}\t{csi}\t{acc}\n')
-            logs['cf'].append(f'{tn}\t{fn}\n{fp}\t{tp}\n')
+            # logs['log'].append(f'{recall}\t{precision}\t{F1}\t{csi}\t{acc}\n')
+            # logs['cf'].append(f'{tn}\t{fn}\n{fp}\t{tp}\n')
+            if test:
+              wandb.log({"recall_t": recall, "precision_t": precision, "F1_t": F1, "csi_t": csi, "acc_t": acc, "tn_t": tn, "fn_t": fn, "fp_t": fp, "tp_t": tp})
+            else:
+              wandb.log({"recall": recall, "precision": precision, "F1": F1, "csi": csi, "acc": acc, "tn": tn, "fn": fn, "fp": fp, "tp": tp})
     return logs
 SMOOTH = 1e-6
 def iou_class(y_pred: t.Tensor, y_true: t.Tensor):
