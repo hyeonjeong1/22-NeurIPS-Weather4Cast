@@ -22,7 +22,7 @@
 
 
 import argparse
-
+from typing import Union, Optional
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.plugins import DDPPlugin
@@ -234,6 +234,7 @@ if __name__ == "__main__":
 
     1) train from scratch on one GPU
     python train.py --gpus 5 6 7 --mode train --config_path config_baseline.yaml --name baseline_train
+    python train.py --gpus 1 --mode train --config_path config_baseline.yaml --name baseline_train
 
     2) train from scratch on four GPUs
     python train.py --gpus 0 1 2 3 --mode train --config_path config_baseline.yaml --name baseline_train
