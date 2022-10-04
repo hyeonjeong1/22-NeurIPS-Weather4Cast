@@ -28,7 +28,7 @@
 VERBOSE=False
 # VERBOSE=True
 
-__all__ = ['UNet']
+__all__ = ['UNetBottle']
 
 import copy
 import itertools
@@ -213,8 +213,12 @@ class DownConv(nn.Module):
         self.dim = dim
         padding = 1 if 'same' in conv_mode else 0
 
+        self.conv0 =  conv1(
+            self.in_channels, self.out_channels, dim=dim
+        )
+        
         self.conv1 = conv3(
-            self.in_channels, self.out_channels, planar=planar, dim=dim, padding=padding
+            self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
         )
         self.conv2 = conv3(
             self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
@@ -245,18 +249,20 @@ class DownConv(nn.Module):
         else:
             self.norm0 = nn.Identity()
             if VERBOSE: print("DownConv, no full_norm")
-#         self.norm1 = get_normalization(normalization, self.out_channels, dim=dim)
-        self.norm1 = nn.GroupNorm(num_groups=4, num_channels=self.out_channels)
+        self.norm1 = get_normalization(normalization, self.out_channels, dim=dim)
+#         self.norm1 = nn.GroupNorm(num_groups=4, num_channels=self.out_channels)
         if VERBOSE: print("DownConv, norm1 =",normalization)
 
     def forward(self, x):
-        y = self.conv1(x)
+        identity = self.conv0(x)
+        y = self.conv1(identity)
         y = self.norm0(y)
         y =  self.dropout(y)
         y = self.act1(y)
         y = self.conv2(y)
         y = self.norm1(y)
         y =  self.dropout(y)
+        y += identity
         y = self.act2(y)
         before_pool = y
         y = self.pool(y)
@@ -379,17 +385,19 @@ class UpConv(nn.Module):
         self.act0 = get_activation(activation)
         self.act1 = get_activation(activation)
         self.act2 = get_activation(activation)
+        self.act3 = get_activation(activation)
 
         if full_norm:
             self.norm0 = get_normalization(normalization, self.out_channels, dim=dim)
             self.norm1 = get_normalization(normalization, self.out_channels, dim=dim)
+#             self.norm1 = nn.GroupNorm(num_groups=4, num_channels=self.out_channels)
         else:
             self.norm0 = nn.Identity()
             self.norm1 = nn.Identity()
         self.norm2 = get_normalization(normalization, self.out_channels, dim=dim)
         if attention:
             self.attention = GridAttention(
-                in_channels=in_channels // 2, gating_channels=in_channels, dim=dim
+                in_channels=in_channels, gating_channels=in_channels, dim=dim
             )
         else:
             self.attention = DummyAttention()
@@ -415,11 +423,14 @@ class UpConv(nn.Module):
             mrg = updec + genc
         y = self.conv1(mrg)
         y = self.norm1(y)
-        y = self.act1(y)
-        y = self.conv2(y)
+        identity = self.act1(y)
+        
+        y = self.conv2(identity)
         y = self.norm2(y)
         y = self.act2(y)
         y = self.conv3(y)
+        y = self.act3(y + identity)
+        
         return y
 
 
@@ -562,7 +573,7 @@ class DummyAttention(nn.Module):
 
 
 # TODO: Pre-calculate output sizes when using valid convolutions
-class UNet(nn.Module):
+class UNetBottle(nn.Module):
     """Modified version of U-Net, adapted for 3D biomedical image segmentation
 
     The U-Net is a convolutional encoder-decoder neural network.
@@ -777,7 +788,7 @@ class UNet(nn.Module):
             planar_blocks: Sequence = (),
             batch_norm: str = 'unset',
             attention: bool = False,
-            activation: Union[str, nn.Module] = 'leaky',
+            activation: Union[str, nn.Module] = 'celu',
             normalization: str = 'batch',
             full_norm: bool = True,
             dim: int = 3,
@@ -969,7 +980,7 @@ def test_model(
     dim=3
 ):
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    model = UNet(
+    model = UNetBottle(
         in_channels=in_channels,
         out_channels=out_channels,
         n_blocks=n_blocks,

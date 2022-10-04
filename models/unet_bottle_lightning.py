@@ -32,15 +32,15 @@ import numpy as np
 # from utils.data_utils import mixup_data, mixup_criterion
 
 #models
-from models.baseline_UNET3D import UNet as Base_UNET3D # 3_3_2 model selection
+from models.baseline_UNET3D_bottleneck import UNetBottle as Base_UNET3D # 3_3_2 model selection
 
 VERBOSE = False
 #VERBOSE = True
 
-class UNet_Lightning(pl.LightningModule):
+class UNetBottle_Lightning(pl.LightningModule):
     def __init__(self, UNet_params: dict, params: dict,
                  **kwargs):
-        super(UNet_Lightning, self).__init__()
+        super(UNetBottle_Lightning, self).__init__()
 
         self.in_channels = params['in_channels']
         self.start_filts = params['init_filter_size']
@@ -70,7 +70,8 @@ class UNet_Lightning(pl.LightningModule):
             'BCELoss': nn.BCELoss(), 
             'BCEWithLogitsLoss': nn.BCEWithLogitsLoss(pos_weight=pos_weight), 'CrossEntropy': nn.CrossEntropyLoss(), 'DiceBCE': DiceBCELoss(), 'DiceLoss': DiceLoss()
             }[self.loss]
-
+        
+        self.valid_loss_fn = DiceLoss()
         self.relu = nn.ReLU() # None
         t = f"============== n_workers: {params['n_workers']} | batch_size: {params['batch_size']} \n"+\
             f"============== loss: {self.loss} | weight: {pos_weight} (if using BCEwLL)"
@@ -116,6 +117,21 @@ class UNet_Lightning(pl.LightningModule):
         #print("mask---->", mask.shape)
         return mask
     
+    
+    def _compute_valid_loss(self, y_hat, y, agg=True, mask=None):
+        if mask is not None:
+            y_hat = self.retrieve_only_valid_pixels(y_hat, mask)
+            y = self.retrieve_only_valid_pixels(y, mask)
+        # print("================================================================================")
+        # print(y_hat.shape, y_hat.min(), y_hat.max())
+        # print(y.shape, y.min(), y.max())
+        if agg:
+            loss = self.valid_loss_fn(y_hat, y)
+        else:
+            loss = self.valid_loss_fn(y_hat, y, reduction='none')
+        return loss
+    
+    
     def _compute_loss(self, y_hat, y, agg=True, mask=None):
         if mask is not None:
             y_hat = self.retrieve_only_valid_pixels(y_hat, mask)
@@ -141,6 +157,7 @@ class UNet_Lightning(pl.LightningModule):
 
         mixed_x = lam * x + (1 - lam) * x[index]
         y_a, y_b = y, y[index]
+        
         metadata['target']['mask'] = metadata['target']['mask'] | metadata['target']['mask'][index]
         return mixed_x, y_a, y_b, metadata, lam
     
@@ -220,6 +237,7 @@ class UNet_Lightning(pl.LightningModule):
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
 
         loss = self._compute_loss(y_hat, y, mask=mask)
+#         loss = self._compute_valid_loss(y_hat, y, mask=mask)
 
         # todo: add the same plot as in `test_step`
 
@@ -229,10 +247,11 @@ class UNet_Lightning(pl.LightningModule):
             idx_gt0 = y_hat>=0
             y_hat[idx_gt0] = 1
             y_hat[~idx_gt0] = 0
-        elif self.loss=='DiceBCE':
+        elif self.loss=='DiceBCE' or self.loss == 'DiceLoss':
             idx_gt0 = y_hat>=0
             y_hat[idx_gt0] = 1
-            y_hat[~idx_gt0] = 0            
+            y_hat[~idx_gt0] = 0    
+            
 
 #         y shape: torch.Size([16, 1, 32, 252, 252]), y_hat shape: torch.Size([16, 1, 32, 252, 252])
         recall, precision, F1, acc, csi = recall_precision_f1_acc(y, y_hat)
@@ -252,6 +271,7 @@ class UNet_Lightning(pl.LightningModule):
         values = {'val_acc': acc, 'val_recall': recall, 'val_precision': precision, 'val_F1': F1, 'val_iou': iou, 'val_CSI': csi}
         self.log_dict(values, batch_size=self.bs)
     
+#         return csi
         return loss
 
     def validation_epoch_end(self, outputs, phase='val'):
@@ -276,7 +296,7 @@ class UNet_Lightning(pl.LightningModule):
             idx_gt0 = y_hat>=0
             y_hat[idx_gt0] = 1
             y_hat[~idx_gt0] = 0
-        elif self.loss=='DiceBCE':
+        elif self.loss=='DiceBCE' or self.loss == 'DiceLoss':
             idx_gt0 = y_hat>=0
             y_hat[idx_gt0] = 1
             y_hat[~idx_gt0] = 0            
@@ -312,8 +332,8 @@ class UNet_Lightning(pl.LightningModule):
             idx_gt0 = y_hat>=0
             y_hat[idx_gt0] = 1
             y_hat[~idx_gt0] = 0
-        elif self.loss=='DiceBCE':
-            idx_gt0 = y_hat>=-0.2
+        elif self.loss=='DiceBCE' or self.loss == 'DiceLoss':
+            idx_gt0 = y_hat>= 0
             y_hat[idx_gt0] = 1
             y_hat[~idx_gt0] = 0
         return y_hat
@@ -399,17 +419,22 @@ class DiceLoss(nn.Module):
     def forward(self, targets, inputs, smooth=1):
         
         #comment out if your model contains a sigmoid or equivalent activation layer
-        inputs = F.sigmoid(inputs)       
+        inputs = F.sigmoid(inputs)    
         
         #flatten label and prediction tensors
         inputs = inputs.view(-1)
         targets = targets.view(-1)
         
+        idx_binary = targets > 0
+        targets[idx_binary] = 1.
+        targets[~idx_binary] = 0.
+        
         intersection = (inputs * targets).sum()      
-        print('intersection', intersection)
-        print('inputs', inputs.sum())
-        print('targets', targets.sum())                     
+#         print('intersection', intersection)
+#         print('inputs', inputs.sum())
+#         print('targets', targets.sum())                     
         dice = (2.*intersection + smooth)/(inputs.sum() + targets.sum() + smooth)  
+#         print("dice", dice)
 
         return 1 - dice
 
@@ -429,6 +454,6 @@ class DiceBCELoss(nn.Module):
         intersection = (inputs * targets).sum()                            
         dice_loss = 1 - (2.*intersection + smooth)/(inputs.sum() + targets.sum() + smooth)  
         BCE = F.binary_cross_entropy(inputs, targets, reduction='mean')
-        Dice_BCE = BCE + dice_loss
+        Dice_BCE = 0.8* BCE + 1.2* dice_loss
         
-        return Dice_BCE
+        return Dice_BCE 
