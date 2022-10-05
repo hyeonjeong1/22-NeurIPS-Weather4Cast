@@ -47,9 +47,10 @@ class RainData(Dataset):
                  size_target_center=None,full_opera_context=None,
                  preprocess_HRIT=None, path_to_sample_ids='',
                  len_seq_in=4, len_seq_predict=32,
-                 regions=['boxi_0015'], regions_def={}, generate_samples=False,
+                 regions=[], regions_def={}, generate_samples=False,
                  latlon_path='', altitudes_path='', 
                  splits_path=None, swap_time_ch=False,
+                 transform=False,
                  **kwargs):
         start = timer()
         # Data Dimensions 
@@ -82,6 +83,7 @@ class RainData(Dataset):
         self.idxs = load_sample_ids(self.data_split, self.splits_df,
                                     self.len_seq_in, self.len_seq_predict, self.regions,
                                     self.generate_samples, self.path_to_sample_ids) 
+    
 
         #LOAD DATASET 
         self.in_ds = load_dataset(self.data_root, self.data_split, self.regions, self.input_product)
@@ -130,6 +132,7 @@ class RainData(Dataset):
         output_data, metadata = self.load_out(out_seq, seq_r, metadata)
 
         if VERBOSE: print(time.time()-t0,"seconds")
+        
         return input_data, output_data, metadata
 
     def __getitem__(self, idx):
@@ -137,6 +140,7 @@ class RainData(Dataset):
         in_seq = self.idxs[idx][0]
         out_seq = self.idxs[idx][1]
         seq_r = self.idxs[idx][2]
+        
         return self.load_in_out(in_seq, out_seq, seq_r)
 
 class Normalise(object): 

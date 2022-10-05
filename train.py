@@ -32,6 +32,7 @@ from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 import datetime
 import os
 import torch 
+import wandb
 
 from models.unet_lightning import UNet_Lightning as UNetModel
 from utils.data_utils import load_config
@@ -144,12 +145,18 @@ def do_test(trainer, model, test_data):
 def train(params, gpus, mode, checkpoint_path, model=UNetModel): 
     """ main training/evaluation method
     """
+    # wandb
+    if params['logging']:
+        wandb.init(project=params['model']['model_name'], name=params['experiment']['name'],  entity="w4c")
+    
     # ------------
     # model & data
     # ------------
     get_cuda_memory_usage(gpus)
     data = DataModule(params['dataset'], params['train'], mode)
     model = load_model(model, params, checkpoint_path)
+    if params['logging']:
+        wandb.watch(model)
     # ------------
     # Add your models here
     # ------------
@@ -200,6 +207,8 @@ def update_params_based_on_args(options):
     if options.name != '':
         print(params['experiment']['name'])
         params['experiment']['name'] = options.name
+    
+    params['logging'] = options.logging
     return params
     
 def set_parser():
@@ -216,6 +225,8 @@ def set_parser():
                         help="init a model from a checkpoint path. '' as default (random weights)")
     parser.add_argument("-n", "--name", type=str, required=False, default='', 
                          help="Set the name of the experiment")
+    parser.add_argument("-l", "--logging", action='store_true',
+                        help="wandb logging true or not")
 
     return parser
 
@@ -228,12 +239,10 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
-    "is there a new branch"
     """ examples of usage:
 
     1) train from scratch on one GPU
-    python train.py --gpus 5 6 7 --mode train --config_path config_baseline.yaml --name baseline_train
+    python train.py --gpus 1 --mode train --config_path config_baseline.yaml --name binary_label_normalize -l
 
     2) train from scratch on four GPUs
     python train.py --gpus 0 1 2 3 --mode train --config_path config_baseline.yaml --name baseline_train
@@ -243,21 +252,16 @@ if __name__ == "__main__":
     
     4) evaluate a trained model from a checkpoint on two GPUs
     python train.py --gpus 0 1 --mode val  --config_path config_baseline.yaml  --checkpoint "lightning_logs/PATH-TO-YOUR-MODEL-LOGS/checkpoints/YOUR-CHECKPOINT-FILENAME.ckpt" --name baseline_validate
-    python train.py --gpus 6 7 --mode val  --config_path config_baseline.yaml  --checkpoint "lightning_logs/baseline/baseline_train_0830-05:22/checkpoints/epoch=27-val_loss_epoch=0.789238.ckpt" --name baseline_validate
+    python train.py --gpus 2 6 --mode val  --config_path config_baseline.yaml  --checkpoint "lightning_logs/baseline/binary_label_0913-16:01/checkpoints/epoch=16-val_loss_epoch=0.822875.ckpt" --name baseline_validate
 
     5) generate predictions (plese note that this mode works only for one GPU)
-    python train.py --gpus 1 --mode predict  --config_path config_baseline.yaml  --checkpoint "lightning_logs/PATH-TO-YOUR-MODEL-LOGS/checkpoints/YOUR-CHECKPOINT-FILENAME.ckpt"
+    python train.py --gpus 2 --mode predict  --config_path config_baseline.yaml  --checkpoint "lightning_logs/baseline/binary_label_0913-16:01/checkpoints/epoch=16-val_loss_epoch=0.822875.ckpt"
 
     """
     
     """
     
-    5D
     input shape: torch.Size([16, 11, 4, 252, 252]), label shape: torch.Size([16, 1, 32, 252, 252])
     BATCH X CHANNEL X TIME X IMG SIZE
-    
-    4D
-    input shape: 
-    BATCh X (CANNEL 1 + CHANNEL 2 + ... + CHANNEL 11)
     
     """

@@ -8,12 +8,12 @@ dataset:
   generate_samples: True  # only needs to be done once to write sample names to pkl cache 
   # Available bands: 'IR_016', 'IR_039', 'IR_087', 'IR_097', 'IR_108', 'IR_120', 'IR_134', 'VIS006', 'VIS008', 'WV_062', 'WV_073'
   sat_bands: ['IR_016', 'IR_039', 'IR_087', 'IR_097', 'IR_108', 'IR_120', 'IR_134', 'VIS006', 'VIS008', 'WV_062', 'WV_073']
-  regions: ['boxi_0015', 'boxi_0034', 'boxi_0076']
+  regions: ['boxi_0015','boxi_0034','boxi_0076']
   # or, e.g., ['boxi_0015'] if you want to train your model for one region only
   input_product: REFL-BT 
   output_product: RATE 
   out_channels: 1 
-  in_channels: 44
+  in_channels: 11
   swap_time_ch: True #swap the time and channels axis - if set to False (B, T, C, H, W)
   full_opera_context: 1512 # (105+42+105)*6; 
   size_target_center:  252 # 42*6;  
@@ -33,7 +33,8 @@ dataset:
         mean_std: [0.07165331, 0.6302647]
         range: [0, 128]          # 2. we evaluate only pixels in this range
         standardise: False       # 3. use log(x+1) instead & normalize (x/max)
-        bin: False     
+        bin: False 
+        binary: True 
   preprocess_HRIT:  # 1: map values, 2: normalise in range per variable if process==True
     #  # var mean sd min median max length
     #  1 IR_016 0.06605569 0.09920627 0 0.006609255 1.018736 4371869376 
@@ -104,26 +105,25 @@ dataset:
       standardise: True
     
 train:    # model training settings
-  batch_size: 8
+  batch_size: 50
   max_epochs: 90
   n_workers: 16  # 8
-  loss: BCEWithLogitsLoss
+  loss: DiceBCE
   pos_weight: 6.114572
   early_stopping: True
-  patience: 5
-  lr: 1e-4
-  weight_decay: 2e-2 
+  patience: 10
+  lr: 5e-4
+  weight_decay: 1e-4
   init_filter_size: 32
-  mixup: False
+  mixup: 0
   alpha: 0.2
   cutmix_p: 1.0
-  dimension: 2
 model:    # model definition settings
   model_name: 3D_UNET_base
-  in_channels: 44  
+  in_channels: 11  
   gradient_clip_val: 2.0
   gradient_clip_algorithm: value
 
 predict:  # model prediction settings
-  region_to_predict: boxi_0015  # must match one of the names defined in 'dataset' / 'regions'
+  region_to_predict: boxi_0076  # must match one of the names defined in 'dataset' / 'regions'
   year_to_predict: 2019

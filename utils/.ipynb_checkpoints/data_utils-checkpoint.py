@@ -86,6 +86,8 @@ def generate_and_cache_sequences(split, splits_df, len_seq_in, len_seq_predict, 
     qq = samples.copy()
     with open(path_name, 'wb') as f:
         pickle.dump(qq, f)
+#     print(f'!!!!!!!!!!!!!!{split} dataset indices length: {len(samples[split])}, first 10 indicees: {samples[split][:10]}')
+    # idx -> [[input indices], [predict indices], region]
     return samples[split]
 
 def read_samples_ids(path, data_split):
@@ -307,10 +309,9 @@ def get_sequence(seq, root, data_split, region, product, bands, preprocess=None,
     mask_seq = np.asarray(mask_seq)
 
     # Swapping Axes to give shape  channels x time x width x height 
-    prod_seq = np.swapaxes(prod_seq, 0, 1)
-    mask_seq = np.swapaxes(mask_seq, 0, 1)
-    
-    prod_seq = prod_seq.reshape(prod_seq.shape[0]*prod_seq.shape[1],prod_seq.shape[2],prod_seq.shape[3])
+    if swap_time_ch:
+        prod_seq = np.swapaxes(prod_seq, 0, 1)
+        mask_seq = np.swapaxes(mask_seq, 0, 1)
     return np.array(prod_seq), mask_seq
 
 def get_file(sample_id, root, data_split, region, product, bands, preprocess=None, ds=None):
@@ -481,6 +482,9 @@ def preprocess_OPERA(x, preprocess, verbose=False):
     if preprocess['bin']: 
         bins = np.arange(0,128, 0.2)
         x = np.digitize(x, bins)
+    if preprocess['binary']:
+        x[x>0] = 1
+        
     if verbose: print(3, np.unique(x, return_counts=True))
     return x
 

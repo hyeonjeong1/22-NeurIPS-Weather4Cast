@@ -32,7 +32,7 @@ import numpy as np
 # from utils.data_utils import mixup_data, mixup_criterion
 
 #models
-from models.baseline_UNET2D import UNet as Base_UNET2D # 3_3_2 model selection
+from models.baseline_UNET3D import UNet as Base_UNET3D # 3_3_2 model selection
 
 VERBOSE = False
 #VERBOSE = True
@@ -42,10 +42,9 @@ class UNet_Lightning(pl.LightningModule):
                  **kwargs):
         super(UNet_Lightning, self).__init__()
 
-        self.in_channels = params['in_channels'] # 11
-        self.start_filts = params['init_filter_size'] # 1
-        self.model = Base_UNET2D(in_channels=self.in_channels,start_filts =  self.start_filts)
-        self.len_seq_predict = params['len_seq_predict']
+        self.in_channels = params['in_channels']
+        self.start_filts = params['init_filter_size']
+        self.model = Base_UNET3D(in_channels=self.in_channels,start_filts =  self.start_filts)
 
         self.save_hyperparameters()
         self.params = params
@@ -77,39 +76,39 @@ class UNet_Lightning(pl.LightningModule):
             f"============== loss: {self.loss} | weight: {pos_weight} (if using BCEwLL)"
         print(t)
         
-#         self.valid_log = []
-#         self.valid_cf = []
-#         for i in range(1,self.start_filts+1):
-#             self.valid_log.append(open(f'./logs/valid_{i}h.log',"w"))
-#             self.valid_cf.append(open(f'./logs/valid_cf_{i}h.log',"w"))
-#             self.valid_log[i-1].write('recall\tprecision\tf1\tcsi\tacc')
-#             self.valid_log[i-1].flush()
-#             self.valid_cf[i-1].write('tn\tf\nfp\ntp')
-#             self.valid_cf[i-1].flush()
-#         self.test_log = []
-#         self.test_cf = []
-#         for i in range(1,self.start_filts+1):
-#             self.test_log.append(open(f'./logs/test_{i}h.log',"w"))
-#             self.test_cf.append(open(f'./logs/test_cf_{i}h.log',"w"))
-#             self.test_log[i-1].write('recall\tprecision\tf1\tcsi\tacc')
-#             self.test_log[i-1].flush()
-#             self.test_cf[i-1].write('tn\tf\nfp\ntp')
-#             self.test_cf[i-1].flush()
+        # self.valid_log = []
+        # self.valid_cf = []
+        # for i in range(1,self.start_filts+1):
+        #     self.valid_log.append(open(f'./logs/valid_{i}h.log',"w"))
+        #     self.valid_cf.append(open(f'./logs/valid_cf_{i}h.log',"w"))
+        #     self.valid_log[i-1].write('recall\tprecision\tf1\tcsi\tacc')
+        #     self.valid_log[i-1].flush()
+        #     self.valid_cf[i-1].write('tn\tf\nfp\ntp')
+        #     self.valid_cf[i-1].flush()
+        # self.test_log = []
+        # self.test_cf = []
+        # for i in range(1,self.start_filts+1):
+        #     self.test_log.append(open(f'./logs/test_{i}h.log',"w"))
+        #     self.test_cf.append(open(f'./logs/test_cf_{i}h.log',"w"))
+        #     self.test_log[i-1].write('recall\tprecision\tf1\tcsi\tacc')
+        #     self.test_log[i-1].flush()
+        #     self.test_cf[i-1].write('tn\tf\nfp\ntp')
+        #     self.test_cf[i-1].flush()
     
     def on_fit_start(self):
         """ create a placeholder to save the results of the metric per variable """
         metric_placeholder = {self.main_metric: -1}
         self.logger.log_hyperparams(self.hparams, metric_placeholder)
         
-    def forward(self, x, lead):
-        x = self.model(x,lead)
+    def forward(self, x):
+        x = self.model(x)
         #if self.loss =='BCELoss':
         #x = self.relu(x)
         return x
 
     def retrieve_only_valid_pixels(self, x, m):
         """ we asume 1s in mask are invalid pixels """
-#         print(f"x: {x.shape} | mask: {m.shape}")
+        ##print(f"x: {x.shape} | mask: {m.shape}")
         return x[~m]
 
     def get_target_mask(self, metadata):
@@ -184,7 +183,6 @@ class UNet_Lightning(pl.LightningModule):
 
     def training_step(self, batch, batch_idx, phase='train'):
         x, y, metadata  = batch
-        y = y.unsqueeze(1)
         y_a, y_b, lam = None, None, None
         
         r = np.random.rand(1)
@@ -197,21 +195,7 @@ class UNet_Lightning(pl.LightningModule):
         
         if VERBOSE:
             print('x', x.shape, 'y', y.shape, '----------------- batch')
-        
-        y_hat = []
-        for lead in range(self.len_seq_predict):
-            tmp_hat = self.forward(x, lead)
-            y_hat.append(tmp_hat)
-        
-                    
-#         print("train step")
-#         print('x', x.shape, 'y', y.shape, '----------------- batch')
-#         print('y_hat[0]', y_hat[0].shape)
-        
-        y_hat = torch.stack(y_hat, dim=2)
-#         print('y_hat', y_hat.shape)
-        
-        
+        y_hat = self.forward(x)
         if VERBOSE:
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
         mask = self.get_target_mask(metadata)
@@ -227,26 +211,10 @@ class UNet_Lightning(pl.LightningModule):
         #data_start = timer()
         x, y, metadata  = batch
         #data_end = timer()
-        y = y.unsqueeze(1)
         
         if VERBOSE:
             print('x', x.shape, 'y', y.shape, '----------------- batch')
-        
-        
-        y_hat = []
-        for lead in range(self.len_seq_predict):
-            tmp_hat = self.forward(x, lead)
-            y_hat.append(tmp_hat)
-            
-                    
-#         print("validation step")
-#         print('x', x.shape, 'y', y.shape, '----------------- batch')
-#         print('y_hat[0]', y_hat[0].shape)
-        
-        y_hat = torch.stack(y_hat, dim=2)
-#         print('y_hat', y_hat.shape)
-        
-        
+        y_hat = self.forward(x)
         mask = self.get_target_mask(metadata)
         if VERBOSE:
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
@@ -255,7 +223,7 @@ class UNet_Lightning(pl.LightningModule):
 
         # todo: add the same plot as in `test_step`
 
-        if self.loss=="BCEWithLogitsLoss":
+        if self.loss=="BCEWithLogitsLoss" or self.loss=="DiceLoss" or self.loss=="DiceBCE":
             print("applying thresholds to y_hat logits")
             # set the logits threshold equivalent to sigmoid(x)>=0.5
             idx_gt0 = y_hat>=0
@@ -263,13 +231,14 @@ class UNet_Lightning(pl.LightningModule):
             y_hat[~idx_gt0] = 0
 #         y shape: torch.Size([16, 1, 32, 252, 252]), y_hat shape: torch.Size([16, 1, 32, 252, 252])
         recall, precision, F1, acc, csi = recall_precision_f1_acc(y, y_hat)
-#         logs = write_temporal_recall_precision_f1_acc(y.squeeze(), y_hat.squeeze(),self.start_filts)
+        if self.params['logging']:
+            logs = write_temporal_recall_precision_f1_acc(y.squeeze(), y_hat.squeeze(),self.start_filts)
         
-#         for i in range(self.start_filts):
-#             self.valid_log[i].write(logs['log'][i])
-#             self.valid_cf[i].write(logs['cf'][i])
-#             self.valid_log[i].flush()
-#             self.valid_cf[i].flush()
+        # for i in range(self.start_filts):
+        #     self.valid_log[i].write(logs['log'][i])
+        #     self.valid_cf[i].write(logs['cf'][i])
+        #     self.valid_log[i].flush()
+        #     self.valid_cf[i].flush()
             
         iou = iou_class(y_hat, y)
 
@@ -288,27 +257,15 @@ class UNet_Lightning(pl.LightningModule):
 
     def test_step(self, batch, batch_idx, phase='test'):
         x, y, metadata = batch
-        y = y.unsqueeze(1)
         if VERBOSE:
             print('x', x.shape, 'y', y.shape, '----------------- batch')
-        
-        y_hat = []
-        for lead in range(self.len_seq_predict):
-            tmp_hat = self.forward(x, lead)
-            y_hat.append(tmp_hat)
-                    
-#         print("test step")
-#         print('x', x.shape, 'y', y.shape, '----------------- batch')
-#         print('y_hat[0]', y_hat[0].shape)
-        
-        y_hat = torch.stack(y_hat, dim=2)
-#         print('y_hat', y_hat.shape)
+        y_hat = self.forward(x)
         mask = self.get_target_mask(metadata)
         if VERBOSE:
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
         loss = self._compute_loss(y_hat, y, mask=mask)
         ## todo: add the same plot as in `test_step`
-        if self.loss=="BCEWithLogitsLoss":
+        if self.loss=="BCEWithLogitsLoss" or self.loss=="DiceLoss" or self.loss=="DiceBCE":
             print("applying thresholds to y_hat logits")
             # set the logits threshold equivalent to sigmoid(x)>=0.5
             idx_gt0 = y_hat>=0
@@ -316,13 +273,14 @@ class UNet_Lightning(pl.LightningModule):
             y_hat[~idx_gt0] = 0
         
         recall, precision, F1, acc, csi = recall_precision_f1_acc(y, y_hat)
-#         logs=write_temporal_recall_precision_f1_acc(y.squeeze(), y_hat.squeeze(),self.start_filts)
-#         for i in range(self.start_filts):
-#             self.test_log[i].write(logs['log'][i])
-#             self.test_cf[i].write(logs['cf'][i])
+        if self.params['logging']:
+            logs=write_temporal_recall_precision_f1_acc(y.squeeze(), y_hat.squeeze(),self.start_filts, test=True)
+        # for i in range(self.start_filts):
+        #     self.test_log[i].write(logs['log'][i])
+        #     self.test_cf[i].write(logs['cf'][i])
             
-#             self.test_log[i].flush()
-#             self.test_cf[i].flush()
+        #     self.test_log[i].flush()
+        #     self.test_cf[i].flush()
             
         iou = iou_class(y_hat, y)
 
@@ -339,7 +297,7 @@ class UNet_Lightning(pl.LightningModule):
         mask = self.get_target_mask(metadata)
         if VERBOSE:
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
-        if self.loss=="BCEWithLogitsLoss":
+        if self.loss=="BCEWithLogitsLoss" or self.loss=="DiceLoss" or self.loss=="DiceBCE":
             print("applying thresholds to y_hat logits")
             # set the logits threshold equivalent to sigmoid(x)>=0.5
             idx_gt0 = y_hat>=0
