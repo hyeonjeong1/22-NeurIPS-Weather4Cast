@@ -339,7 +339,6 @@ def get_file(sample_id, root, data_split, region, product, bands, preprocess=Non
     #Get file containing all neede channels for a given time - (1xCxWxH)
     prods = []
     masks = []
-   
     x = read_file(sample_id, ds, region)
     x = np.float32(x)
     if VERBOSE: print(time.time()-file_t,"reading file time")
@@ -451,6 +450,7 @@ def preprocess_HRIT(x, preprocess, verbose=False):
     if preprocess['standardise']:
         #x = x/M    
         mean, stdev = preprocess['mean_std']
+        # mean, stdev = get_mean_std(x)
         x = x - mean
         x = x/stdev
     if verbose: print(3, np.uniquze(x, return_counts=True))
@@ -614,24 +614,26 @@ def get_mean_std(dataset, batch_size = 10):
     nimages = 0
     mean = 0
     std = 0
-    count = 0
-    for batch, _ , _ in loader:
-        print(count)
-        count += 1
+    # count = 0
+    for i, batch in enumerate(loader):
+        # print(i)
+        # count += 1
         # Rearrange batch to be the shape of [B, C, T * W * H]
-        batch = batch.view(batch.size(0), batch.size(1), -1)
+        # print(batch.size())
+        # batch = batch.view(batch.size(0), batch.size(1), -1)
+        # print(batch.size())
         # Update total number of images
         nimages += batch.size(0)
 
         #Compute mean of T * W * H 
         # Sum over samples
-        mean += batch.mean(2).sum(0) 
-        std += batch.std(2).sum(0)
+        mean += batch.mean(1).sum(0) 
+        std += batch.std(1).sum(0)
     # Final step - divide by number of images to get average of each band
     mean /= nimages
     std /= nimages
-    print(np.array(mean))
-    return mean,std
+    print(np.array(mean).shape)
+    return np.array(mean),np.array(std)
 
 
 def get_mean_std_opera(dataset, batch_size = 10):
