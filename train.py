@@ -146,8 +146,8 @@ def train(params, gpus, mode, checkpoint_path, model=UNetModel):
     """ main training/evaluation method
     """
     # wandb
-    if params['logging']:
-      wandb.init(project=params['model']['model_name'], name=params['experiment']['name'],  entity="w4c")
+    # if params['logging']:
+      # wandb.init(project=params['model']['model_name'], name=params['experiment']['name'],  entity="w4c")
     
     # ------------
     # model & data

@@ -223,7 +223,7 @@ class UNet_Lightning(pl.LightningModule):
 
         # todo: add the same plot as in `test_step`
 
-        if self.loss=="BCEWithLogitsLoss":
+        if self.loss=="BCEWithLogitsLoss" or self.loss=="DiceBCE":
             print("applying thresholds to y_hat logits")
             # set the logits threshold equivalent to sigmoid(x)>=0.5
             idx_gt0 = y_hat>=0
@@ -231,8 +231,8 @@ class UNet_Lightning(pl.LightningModule):
             y_hat[~idx_gt0] = 0
 #         y shape: torch.Size([16, 1, 32, 252, 252]), y_hat shape: torch.Size([16, 1, 32, 252, 252])
         recall, precision, F1, acc, csi = recall_precision_f1_acc(y, y_hat)
-        if self.params['logging']:
-          logs = write_temporal_recall_precision_f1_acc(y.squeeze(), y_hat.squeeze(),self.start_filts)
+        # if self.params['logging']:
+        #   logs = write_temporal_recall_precision_f1_acc(y.squeeze(), y_hat.squeeze(),self.start_filts)
         
         # for i in range(self.start_filts):
         #     self.valid_log[i].write(logs['log'][i])
@@ -265,7 +265,7 @@ class UNet_Lightning(pl.LightningModule):
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
         loss = self._compute_loss(y_hat, y, mask=mask)
         ## todo: add the same plot as in `test_step`
-        if self.loss=="BCEWithLogitsLoss":
+        if self.loss=="BCEWithLogitsLoss" or self.loss=="DiceBCE":
             print("applying thresholds to y_hat logits")
             # set the logits threshold equivalent to sigmoid(x)>=0.5
             idx_gt0 = y_hat>=0
@@ -273,8 +273,8 @@ class UNet_Lightning(pl.LightningModule):
             y_hat[~idx_gt0] = 0
         
         recall, precision, F1, acc, csi = recall_precision_f1_acc(y, y_hat)
-        if self.params['logging']:
-          logs=write_temporal_recall_precision_f1_acc(y.squeeze(), y_hat.squeeze(),self.start_filts, test=True)
+        # if self.params['logging']:
+        #   logs=write_temporal_recall_precision_f1_acc(y.squeeze(), y_hat.squeeze(),self.start_filts, test=True)
         # for i in range(self.start_filts):
         #     self.test_log[i].write(logs['log'][i])
         #     self.test_cf[i].write(logs['cf'][i])
@@ -297,7 +297,7 @@ class UNet_Lightning(pl.LightningModule):
         mask = self.get_target_mask(metadata)
         if VERBOSE:
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
-        if self.loss=="BCEWithLogitsLoss":
+        if self.loss=="BCEWithLogitsLoss" or self.loss=="DiceBCE":
             print("applying thresholds to y_hat logits")
             # set the logits threshold equivalent to sigmoid(x)>=0.5
             idx_gt0 = y_hat>=0
