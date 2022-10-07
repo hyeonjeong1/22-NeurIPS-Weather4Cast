@@ -374,7 +374,10 @@ class DiceBCELoss(nn.Module):
         super(DiceBCELoss, self).__init__()
 
     def forward(self, inputs, targets, reg, r_idx, smooth=1):
-        print(r_idx.shape, reg.shape)
+        #onehot-> label
+        # r_idx = r_idx.unsqueeze(-1)
+        r_idx_label = nn.functional.one_hot(r_idx, num_classes=3)
+        print(r_idx_label.shape, reg.shape, reg[0,:])
         #comment out if your model contains a sigmoid or equivalent activation layer
         inputs = F.sigmoid(inputs)       
         
@@ -384,7 +387,8 @@ class DiceBCELoss(nn.Module):
         
         intersection = (inputs * targets).sum()                            
         dice_loss = 1 - (2.*intersection + smooth)/(inputs.sum() + targets.sum() + smooth)  
-        BCE = F.binary_cross_entropy(inputs, targets, reduction='mean')
+        # BCE = F.binary_cross_entropy(inputs, targets, reduction='mean')
+        BCE = F.binary_cross_entropy(reg.to(torch.float32), r_idx_label.to(torch.float32), reduction='mean')
         Dice_BCE = BCE + dice_loss
         
         return Dice_BCE

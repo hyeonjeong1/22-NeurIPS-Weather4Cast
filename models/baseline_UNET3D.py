@@ -885,6 +885,7 @@ class UNet(nn.Module):
 
         self.region_clf = nn.Linear(252*252*out_channels, 3)
         self.sigmoid = nn.Sigmoid()
+        self.softmax = nn.Softmax()
         self.dropout = nn.Dropout3d(0.4)  ## read this from config!
         self.apply(self.weight_init)
 
@@ -931,7 +932,7 @@ class UNet(nn.Module):
         # self.feature_maps = [x]  # Currently disabled to save memory
         xs = x.shape
         x_ = x.reshape(xs[0], -1)
-        reg = self.sigmoid(self.region_clf(x_))
+        reg = self.softmax(self.region_clf(x_))
         print(reg.shape)
         return x, reg
 
