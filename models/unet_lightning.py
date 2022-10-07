@@ -35,7 +35,7 @@ import numpy as np
 from models.baseline_UNET3D import UNet as Base_UNET3D # 3_3_2 model selection
 
 VERBOSE = False
-#VERBOSE = True
+VERBOSE = True
 
 class UNet_Lightning(pl.LightningModule):
     def __init__(self, UNet_params: dict, params: dict,
@@ -101,10 +101,10 @@ class UNet_Lightning(pl.LightningModule):
         self.logger.log_hyperparams(self.hparams, metric_placeholder)
         
     def forward(self, x):
-        x = self.model(x)
+        x, reg = self.model(x)
         #if self.loss =='BCELoss':
         #x = self.relu(x)
-        return x
+        return x, reg
 
     def retrieve_only_valid_pixels(self, x, m):
         """ we asume 1s in mask are invalid pixels """
@@ -116,17 +116,21 @@ class UNet_Lightning(pl.LightningModule):
         #print("mask---->", mask.shape)
         return mask
     
-    def _compute_loss(self, y_hat, y, agg=True, mask=None):
+    def _compute_loss(self, y_hat, y, agg=True, mask=None, reg=None, r_idx=None):
         if mask is not None:
             y_hat = self.retrieve_only_valid_pixels(y_hat, mask)
             y = self.retrieve_only_valid_pixels(y, mask)
         # print("================================================================================")
-        # print(y_hat.shape, y_hat.min(), y_hat.max())
-        # print(y.shape, y.min(), y.max())
+        print(y_hat.shape, y_hat.min(), y_hat.max())
+        print(y.shape, y.min(), y.max())
         if agg:
-            loss = self.loss_fn(y_hat, y)
+            if self.loss == "DiceBCE":
+              loss = self.loss_fn(y_hat, y, reg, r_idx)
+            else: loss = self.loss_fn(y_hat, y)
         else:
-            loss = self.loss_fn(y_hat, y, reduction='none')
+            if self.loss == "DiceBCE":
+              loss = self.loss_fn(y_hat, y, reg, r_idx, reduction='none')
+            else: loss = self.loss_fn(y_hat, y, reduction='none')
         return loss
     
     def mixup_data(self, x, y, metadata, alpha=1.0):
@@ -182,7 +186,8 @@ class UNet_Lightning(pl.LightningModule):
         return loss
 
     def training_step(self, batch, batch_idx, phase='train'):
-        x, y, metadata  = batch
+        x, y, metadata, r_idx  = batch
+        print("region idx shape: ", r_idx.shape)
         y_a, y_b, lam = None, None, None
         
         r = np.random.rand(1)
@@ -195,35 +200,37 @@ class UNet_Lightning(pl.LightningModule):
         
         if VERBOSE:
             print('x', x.shape, 'y', y.shape, '----------------- batch')
-        y_hat = self.forward(x)
+        y_hat, reg = self.forward(x)
         if VERBOSE:
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
         mask = self.get_target_mask(metadata)
         if self.mixup == 'mixup':
             loss = self._mixup_criterion(y_hat, y_a, y_b, lam, mask=mask)
         else: # cutmix also uses this loss function
-            loss = self._compute_loss(y_hat, y, mask=mask)
+            loss = self._compute_loss(y_hat, y, mask=mask, reg=reg, r_idx=r_idx)
             
         self.log(f'{phase}_loss', loss,batch_size=self.bs)
         return loss
                 
     def validation_step(self, batch, batch_idx, phase='val'):
         #data_start = timer()
-        x, y, metadata  = batch
+        x, y, metadata, r_idx  = batch
+        print("validation step region idx shape: ", r_idx.shape)
         #data_end = timer()
         
         if VERBOSE:
             print('x', x.shape, 'y', y.shape, '----------------- batch')
-        y_hat = self.forward(x)
+        y_hat, reg = self.forward(x)
         mask = self.get_target_mask(metadata)
         if VERBOSE:
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
-
-        loss = self._compute_loss(y_hat, y, mask=mask)
+        if self.loss=="DiceBCE":
+          loss = self._compute_loss(y_hat, y, mask=mask, reg=reg, r_idx=r_idx)
+        else: loss = self._compute_loss(y_hat, y, mask=mask, r_idx=r_idx)
 
         # todo: add the same plot as in `test_step`
 
-        if self.loss=="BCEWithLogitsLoss":
+        if self.loss=="BCEWithLogitsLoss" or self.loss=="DiceBCE":
             print("applying thresholds to y_hat logits")
             # set the logits threshold equivalent to sigmoid(x)>=0.5
             idx_gt0 = y_hat>=0
@@ -265,7 +272,7 @@ class UNet_Lightning(pl.LightningModule):
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
         loss = self._compute_loss(y_hat, y, mask=mask)
         ## todo: add the same plot as in `test_step`
-        if self.loss=="BCEWithLogitsLoss":
+        if self.loss=="BCEWithLogitsLoss" or self.loss=="DiceBCE":
             print("applying thresholds to y_hat logits")
             # set the logits threshold equivalent to sigmoid(x)>=0.5
             idx_gt0 = y_hat>=0
@@ -297,7 +304,7 @@ class UNet_Lightning(pl.LightningModule):
         mask = self.get_target_mask(metadata)
         if VERBOSE:
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
-        if self.loss=="BCEWithLogitsLoss":
+        if self.loss=="BCEWithLogitsLoss" or self.loss=="DiceBCE":
             print("applying thresholds to y_hat logits")
             # set the logits threshold equivalent to sigmoid(x)>=0.5
             idx_gt0 = y_hat>=0
@@ -366,8 +373,8 @@ class DiceBCELoss(nn.Module):
     def __init__(self, weight=None, size_average=True):
         super(DiceBCELoss, self).__init__()
 
-    def forward(self, inputs, targets, smooth=1):
-        
+    def forward(self, inputs, targets, reg, r_idx, smooth=1):
+        print(r_idx.shape, reg.shape)
         #comment out if your model contains a sigmoid or equivalent activation layer
         inputs = F.sigmoid(inputs)       
         

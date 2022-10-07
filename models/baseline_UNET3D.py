@@ -26,12 +26,13 @@
 
 
 VERBOSE=False
-# VERBOSE=True
+VERBOSE=True
 
 __all__ = ['UNet']
 
 import copy
 import itertools
+from tracemalloc import start
 
 from typing import Sequence, Union, Tuple, Optional
 
@@ -881,6 +882,9 @@ class UNet(nn.Module):
             self.up_convs.append(up_conv)
         self.reduce_channels = conv1(outs*4, ## 4= experiment / len_seq_in
                                      self.out_channels, dim=dim)
+
+        self.region_clf = nn.Linear(252*252*out_channels, 3)
+        self.sigmoid = nn.Sigmoid()
         self.dropout = nn.Dropout3d(0.4)  ## read this from config!
         self.apply(self.weight_init)
 
@@ -925,7 +929,11 @@ class UNet(nn.Module):
             # Uncomment the following line to temporarily store output for
         #  receptive field estimation using fornoxai/receptivefield:
         # self.feature_maps = [x]  # Currently disabled to save memory
-        return x
+        xs = x.shape
+        x_ = x.reshape(xs[0], -1)
+        reg = self.sigmoid(self.region_clf(x_))
+        print(reg.shape)
+        return x, reg
 
     @torch.jit.unused
     def forward_gradcp(self, x):

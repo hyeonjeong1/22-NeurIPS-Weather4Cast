@@ -81,7 +81,7 @@ def load_model(Model, params, checkpoint_path=''):
         model = Model(params['model'], p)            
     else:
         print(f'-> Loading model checkpoint: {checkpoint_path}')
-        model = Model.load_from_checkpoint(checkpoint_path, UNet_params=params['model'], params=p)
+        model = Model.load_from_checkpoint(checkpoint_path, UNet_params=params['model'], params=p, strict=False)
     return model
 
 def get_trainer(gpus,params):
@@ -207,7 +207,7 @@ def update_params_based_on_args(options):
     if options.name != '':
         print(params['experiment']['name'])
         params['experiment']['name'] = options.name
-    
+
     params['logging'] = options.logging
     return params
     
