@@ -26,7 +26,7 @@ import argparse
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.plugins import DDPPlugin
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, ConcatDataset
 from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 import datetime
@@ -51,6 +51,12 @@ class DataModule(pl.LightningDataModule):
         if mode in ['train']:
             self.train_ds = RainData('training', **self.params)
             self.val_ds = RainData('validation', **self.params)
+            if params['valid2train']:
+                ("Using Validation as Train!")
+                print("train length: ", self.train_ds.__len__())
+                print("val length: ", self.val_ds.__len__())
+                self.train_ds = ConcatDataset([self.train_ds, self.val_ds])
+                print("after concat: ", self.train_ds.__len__())
         if mode in ['val']:
             self.val_ds = RainData('validation', **self.params)    
         if mode in ['predict']:    

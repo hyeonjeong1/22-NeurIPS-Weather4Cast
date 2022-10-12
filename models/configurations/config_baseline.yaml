@@ -5,10 +5,11 @@ experiment:  # Settings for the current experiment
   precision: 32  # bit precision of weights. 32 or 16 
   logging: True  # Toggle logging on/off
 dataset: 
+  valid2train: True
   generate_samples: False  # only needs to be done once to write sample names to pkl cache 
   # Available bands: 'IR_016', 'IR_039', 'IR_087', 'IR_097', 'IR_108', 'IR_120', 'IR_134', 'VIS006', 'VIS008', 'WV_062', 'WV_073'
   sat_bands: ['IR_016', 'IR_039', 'IR_087', 'IR_097', 'IR_108', 'IR_120', 'IR_134', 'VIS006', 'VIS008', 'WV_062', 'WV_073']
-  regions: ['boxi_0015', 'boxi_0034', 'boxi_76']
+  regions: ['boxi_0015', 'boxi_0034', 'boxi_0076']
   # or, e.g., ['boxi_0015'] if you want to train your model for one region only
   input_product: REFL-BT 
   output_product: RATE 
