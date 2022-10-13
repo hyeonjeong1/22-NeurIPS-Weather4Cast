@@ -26,7 +26,7 @@
 
 
 VERBOSE=False
-VERBOSE=True
+# VERBOSE=True
 
 __all__ = ['UNet']
 
@@ -229,7 +229,7 @@ class DownConv(nn.Module):
             self.pool = nn.Identity()
             self.pool_ks = -123  # Bogus value, will never be read. Only to satisfy TorchScript's static type system
 
-        self.dropout = nn.Dropout3d(0.4)
+        self.dropout = nn.Dropout3d(0.2)
         
         self.act1 = get_activation(activation)
         self.act2 = get_activation(activation)
@@ -884,8 +884,8 @@ class UNet(nn.Module):
                                      self.out_channels, dim=dim)
 
         self.region_clf = nn.Linear(252*252*out_channels, 3)
-        self.sigmoid = nn.Sigmoid()
-        self.dropout = nn.Dropout3d(0.4)  ## read this from config!
+        self.softmax = nn.Softmax()
+        self.dropout = nn.Dropout3d(0.2)  ## read this from config!
         self.apply(self.weight_init)
 
     @staticmethod
@@ -931,8 +931,7 @@ class UNet(nn.Module):
         # self.feature_maps = [x]  # Currently disabled to save memory
         xs = x.shape
         x_ = x.reshape(xs[0], -1)
-        reg = self.sigmoid(self.region_clf(x_))
-        print(reg.shape)
+        reg = self.region_clf(x_)
         return x, reg
 
     @torch.jit.unused

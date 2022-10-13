@@ -35,7 +35,7 @@ import numpy as np
 from models.baseline_UNET3D import UNet as Base_UNET3D # 3_3_2 model selection
 
 VERBOSE = False
-VERBOSE = True
+# VERBOSE = True
 
 class UNet_Lightning(pl.LightningModule):
     def __init__(self, UNet_params: dict, params: dict,
@@ -68,7 +68,7 @@ class UNet_Lightning(pl.LightningModule):
         self.loss_fn = {
             'smoothL1': nn.SmoothL1Loss(), 'L1': nn.L1Loss(), 'mse': F.mse_loss,
             'BCELoss': nn.BCELoss(), 
-            'BCEWithLogitsLoss': nn.BCEWithLogitsLoss(pos_weight=pos_weight), 'CrossEntropy': nn.CrossEntropyLoss(), 'DiceBCE': DiceBCELoss(), 'DiceLoss': DiceLoss()
+            'BCEWithLogitsLoss': nn.BCEWithLogitsLoss(pos_weight=pos_weight), 'CrossEntropy': nn.CrossEntropyLoss(), 'DiceBCE': DiceBCELoss(weight=pos_weight), 'DiceLoss': DiceLoss()
             }[self.loss]
 
         self.relu = nn.ReLU() # None
@@ -121,8 +121,8 @@ class UNet_Lightning(pl.LightningModule):
             y_hat = self.retrieve_only_valid_pixels(y_hat, mask)
             y = self.retrieve_only_valid_pixels(y, mask)
         # print("================================================================================")
-        print(y_hat.shape, y_hat.min(), y_hat.max())
-        print(y.shape, y.min(), y.max())
+        # print(y_hat.shape, y_hat.min(), y_hat.max())
+        # print(y.shape, y.min(), y.max())
         if agg:
             if self.loss == "DiceBCE":
               loss = self.loss_fn(y_hat, y, reg, r_idx)
@@ -187,7 +187,6 @@ class UNet_Lightning(pl.LightningModule):
 
     def training_step(self, batch, batch_idx, phase='train'):
         x, y, metadata, r_idx  = batch
-        print("region idx shape: ", r_idx.shape)
         y_a, y_b, lam = None, None, None
         
         r = np.random.rand(1)
@@ -215,7 +214,7 @@ class UNet_Lightning(pl.LightningModule):
     def validation_step(self, batch, batch_idx, phase='val'):
         #data_start = timer()
         x, y, metadata, r_idx  = batch
-        print("validation step region idx shape: ", r_idx.shape)
+        # print("validation step region idx shape: ", r_idx.shape)
         #data_end = timer()
         
         if VERBOSE:
@@ -231,7 +230,7 @@ class UNet_Lightning(pl.LightningModule):
         # todo: add the same plot as in `test_step`
 
         if self.loss=="BCEWithLogitsLoss" or self.loss=="DiceBCE":
-            print("applying thresholds to y_hat logits")
+            # print("applying thresholds to y_hat logits")
             # set the logits threshold equivalent to sigmoid(x)>=0.5
             idx_gt0 = y_hat>=0
             y_hat[idx_gt0] = 1
@@ -372,19 +371,22 @@ class DiceLoss(nn.Module):
 class DiceBCELoss(nn.Module):
     def __init__(self, weight=None, size_average=True):
         super(DiceBCELoss, self).__init__()
+        self.weight = weight
 
     def forward(self, inputs, targets, reg, r_idx, smooth=1):
-        print(r_idx.shape, reg.shape)
+        # val, ind = torch.max(reg, dim=1)
+        CE_ = F.cross_entropy(reg, r_idx, reduction='mean')
         #comment out if your model contains a sigmoid or equivalent activation layer
         inputs = F.sigmoid(inputs)       
         
         #flatten label and prediction tensors
         inputs = inputs.view(-1)
         targets = targets.view(-1)
+        # print(len(self.weight *len(inputs)))
         
         intersection = (inputs * targets).sum()                            
         dice_loss = 1 - (2.*intersection + smooth)/(inputs.sum() + targets.sum() + smooth)  
         BCE = F.binary_cross_entropy(inputs, targets, reduction='mean')
-        Dice_BCE = BCE + dice_loss
+        Dice_BCE = BCE + dice_loss + CE_*0.5
         
         return Dice_BCE

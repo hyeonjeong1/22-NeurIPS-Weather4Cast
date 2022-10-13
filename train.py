@@ -22,7 +22,9 @@
 
 
 import argparse
-
+from config import seed_everything
+seed_everything(42)
+import segmentation_models_pytorch as smp
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.plugins import DDPPlugin
@@ -33,12 +35,14 @@ import datetime
 import os
 import torch 
 import wandb
-
+from tqdm import tqdm
 from models.unet_lightning import UNet_Lightning as UNetModel
+from torch.utils.data import DataLoader
 from utils.data_utils import load_config
 from utils.data_utils import get_cuda_memory_usage
 from utils.data_utils import tensor_to_submission_file
 from utils.w4c_dataloader import RainData
+import torchvision.transforms
 
 class DataModule(pl.LightningDataModule):
     """ Class to handle training/validation splits in a single object
@@ -52,7 +56,7 @@ class DataModule(pl.LightningDataModule):
             self.val_ds = RainData('validation', **self.params)
         if mode in ['val']:
             self.val_ds = RainData('validation', **self.params)    
-        if mode in ['predict']:    
+        if mode in ['predict', 'generate']:    
             self.test_ds = RainData('test', **self.params)
 
     def __load_dataloader(self, dataset, shuffle=True, pin=True):
@@ -142,6 +146,18 @@ def do_predict(trainer, model, predict_params, test_data):
 def do_test(trainer, model, test_data):
     scores = trainer.test(model, dataloaders=test_data)
 
+def generate_pseudo_labels(model, test_data):
+  ## test_data is DataLoader
+  transforms = torch.nn.Sequential(
+      torchvision.transforms.CenterCrop((224, 224)),
+      # transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+  )
+  print(type(test_data))
+  for i, batch in enumerate(tqdm(test_data)):
+    print(batch[0].shape)
+    res = model(transforms(batch[0]))
+    print(res.shape)
+
 def train(params, gpus, mode, checkpoint_path, model=UNetModel): 
     """ main training/evaluation method
     """
@@ -197,6 +213,31 @@ def train(params, gpus, mode, checkpoint_path, model=UNetModel):
             print("EXITING... \"regions\" and \"regions to predict\" must indicate the same region name in your config file.")
         else:
             do_predict(trainer, model, params["predict"], data.test_dataloader())
+      
+    if mode == 'generate':
+    # ------------
+    # Generate
+    # ------------
+        print("--------------------")
+        print("--- Generate MODE ---")
+        print("--------------------") 
+        aux_params=dict(
+            pooling='max',             # one of 'avg', 'max'
+            # dropout=0.2,               # dropout ratio, default is None
+            activation='sigmoid',      # activation function, default is None
+            classes=1,                 # define number of output labels
+        )
+        model = smp.Unet(
+            encoder_name="resnet34",        # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
+            encoder_depth=5,
+            encoder_weights="imagenet",     # use `imagenet` pre-trained weights for encoder initialization
+            decoder_attention_type="scse",
+            in_channels=11,                  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
+            classes=1,                      # model output channels (number of classes in your dataset)
+            aux_params=aux_params,
+        )
+
+        generate_pseudo_labels(model, data.test_dataloader())
     
     get_cuda_memory_usage(gpus)
 
