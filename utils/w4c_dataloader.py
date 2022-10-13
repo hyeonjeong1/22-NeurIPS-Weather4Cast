@@ -89,6 +89,12 @@ class RainData(Dataset):
             self.out_ds = load_dataset(self.data_root, self.data_split, self.regions, self.output_product)
         else: 
             self.out_ds = []
+            
+        self.reg2idx = {
+          "boxi_0015": 0,
+          "boxi_0034": 1,
+          "boxi_0076": 2,
+        }
         
     def __len__(self):
         """ total number of samples (sequences of in:4-out:1 in our case) to train """
@@ -130,7 +136,7 @@ class RainData(Dataset):
         output_data, metadata = self.load_out(out_seq, seq_r, metadata)
 
         if VERBOSE: print(time.time()-t0,"seconds")
-        return input_data, output_data, metadata
+        return input_data, output_data, metadata, self.reg2idx[seq_r]
 
     def __getitem__(self, idx):
         """ load 1 sequence (1 sample) """

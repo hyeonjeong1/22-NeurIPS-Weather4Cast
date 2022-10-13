@@ -82,7 +82,7 @@ def load_model(Model, params, checkpoint_path=''):
         model = Model(params['model'], p)            
     else:
         print(f'-> Loading model checkpoint: {checkpoint_path}')
-        model = Model.load_from_checkpoint(checkpoint_path, UNet_params=params['model'], params=p)
+        model = Model.load_from_checkpoint(checkpoint_path, UNet_params=params['model'], params=p, strict=False)
     return model
 
 def get_trainer(gpus,params):
@@ -126,7 +126,7 @@ def get_trainer(gpus,params):
     trainer = pl.Trainer(gpus=gpus, max_epochs=max_epochs,
                          gradient_clip_val=params['model']['gradient_clip_val'],
                          gradient_clip_algorithm=params['model']['gradient_clip_algorithm'],
-                         accelerator=paralel_training,
+                         accelerator='gpu',
                          callbacks=callback_funcs,logger=tb_logger,
                          profiler='simple',precision=params['experiment']['precision'],
                          plugins=ddppplugin,
@@ -229,6 +229,7 @@ def set_parser():
                          help="Set the name of the experiment")
     parser.add_argument("-l", "--logging", action='store_true',
                         help="wandb logging true or not")
+    parser.add_argument("--freeze", action='store_true', help='transfer freeze')
 
     return parser
 
@@ -238,7 +239,9 @@ def main():
     print(torch.get_num_threads())
     torch.set_num_threads(64)
     params = update_params_based_on_args(options)
-
+    params['freeze'] = options.freeze
+    print(params['freeze'])
+    
     train(params, options.gpus, options.mode, options.checkpoint)
 
 if __name__ == "__main__":

@@ -19,8 +19,8 @@ dataset:
   size_target_center:  252 # 42*6;  
   len_seq_in: 4        # number of input slots per training sequence
   len_seq_predict: 32  # output slots; both still hard-coded in places!
-  data_root:  '/home/osilab/jupyter/weather/data/2019'
-  splits_path: '/home/osilab/jupyter/weather/data/timestamps_and_splits_2019.csv'
+  data_root:  '/home/taehyeon/jupyter/data/2019'
+  splits_path: '/home/taehyeon/jupyter/data/timestamps_and_splits_2019.csv'
   path_to_sample_ids: 'utils/cached_sample_ids/samples_IDs_2019_stage1_boxi_0015.pkl'  # path cache file for data splits
 
   preprocess_OPERA:
@@ -104,22 +104,24 @@ dataset:
       standardise: True
     
 train:    # model training settings
-  batch_size: 48
+  batch_size: 28
   max_epochs: 30
-  n_workers: 16  # 8
-  loss: BCEWithLogitsLoss
+  n_workers: 8  # 8
+  loss: DiceBCE
   pos_weight: 6.114572
   early_stopping: True
   patience: 5
-  lr: 1e-4
-  weight_decay: 2e-2 
+  lr: 1e-6
+  weight_decay: 0
   init_filter_size: 32
-  mixup: 0
-  alpha: 0.2
+  transfer: True
+  mixup: mixup
+  alpha: 1.0
   cutmix_p: 1.0
+  freeze: False
 model:    # model definition settings
   model_name: 3D_UNET_base
-  in_channels: 11  
+  in_channels: 11
   gradient_clip_val: 2.0
   gradient_clip_algorithm: value
 

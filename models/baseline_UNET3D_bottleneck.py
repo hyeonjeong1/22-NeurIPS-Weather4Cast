@@ -195,6 +195,25 @@ def get_activation(activation):
     else:
         # Deep copy is necessary in case of paremtrized activations
         return copy.deepcopy(activation)
+    
+    
+class SEBlock(nn.Module):
+    def __init__(self, out_channels, dim, reduction=4):
+        super(SEBlock, self).__init__()
+
+        self.fc = nn.Sequential(
+            conv1(out_channels, out_channels//reduction, dim=dim),
+            nn.ReLU(),
+            conv1(out_channels//reduction, out_channels * 2, dim=dim),
+        )
+
+    def forward(self, x):
+        w = F.adaptive_avg_pool3d(x, 1) # Squeeze
+        w = self.fc(x)
+        w, b = w.split(w.data.size(1) // 2, dim=1) # Excitation
+        w = torch.sigmoid(w)
+
+        return x * w + b # Scale and add bias
 
 
 class DownConv(nn.Module):
@@ -203,7 +222,7 @@ class DownConv(nn.Module):
     A ReLU activation follows each convolution.
     """
     def __init__(self, in_channels, out_channels, pooling=True, planar=False, activation='relu',
-                 normalization=None, full_norm=True, dim=3, conv_mode='same'):
+                 normalization=None, full_norm=True, dim=3, conv_mode='same', transfer = False):
         super().__init__()
 
         self.in_channels = in_channels
@@ -227,6 +246,8 @@ class DownConv(nn.Module):
         self.conv3 = conv1(
             self.out_channels, self.out_channels, dim=dim
         )
+        
+        self.se = SEBlock(self.out_channels, dim=dim)
 
         if self.pooling:
             kernel_size = 2
@@ -242,6 +263,7 @@ class DownConv(nn.Module):
         
         self.act1 = get_activation(activation)
         self.act2 = get_activation(activation)
+        self.act3 = get_activation(activation)
 
         if full_norm:
             self.norm0 = get_normalization(normalization, self.out_channels, dim=dim)
@@ -252,6 +274,10 @@ class DownConv(nn.Module):
         self.norm1 = get_normalization(normalization, self.out_channels, dim=dim)
 #         self.norm1 = nn.GroupNorm(num_groups=4, num_channels=self.out_channels)
         if VERBOSE: print("DownConv, norm1 =",normalization)
+        self.norm2 = get_normalization(normalization, self.out_channels, dim=dim)
+        self.transfer = transfer
+        self.film_scale = nn.Parameter(torch.ones(self.out_channels))
+        self.film_bias = nn.Parameter(torch.zeros(self.out_channels))
 
     def forward(self, x):
         identity = self.conv0(x)
@@ -267,6 +293,13 @@ class DownConv(nn.Module):
         before_pool = y
         y = self.pool(y)
         before_pool = self.conv3(before_pool)
+        if self.transfer:
+            # before_pool = self.act3(self.norm2(before_pool))
+            # before_pool = self.se(before_pool)
+            scale = self.film_scale.unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4).expand_as(before_pool)
+            bias = self.film_bias.unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4).expand_as(before_pool)
+            before_pool = (scale * before_pool) + bias
+        
         return y, before_pool
 
 
@@ -353,7 +386,7 @@ class UpConv(nn.Module):
     def __init__(self, in_channels, out_channels,
                  merge_mode='concat', up_mode='transpose', planar=False,
                  activation='relu', normalization=None, full_norm=True, dim=3, conv_mode='same',
-                 attention=False):
+                 attention=False, transfer=False):
         super().__init__()
 
         self.in_channels = in_channels
@@ -395,6 +428,7 @@ class UpConv(nn.Module):
             self.norm0 = nn.Identity()
             self.norm1 = nn.Identity()
         self.norm2 = get_normalization(normalization, self.out_channels, dim=dim)
+        self.norm3 = get_normalization(normalization, self.out_channels, dim=dim)
         if attention:
             self.attention = GridAttention(
                 in_channels=in_channels, gating_channels=in_channels, dim=dim
@@ -402,6 +436,10 @@ class UpConv(nn.Module):
         else:
             self.attention = DummyAttention()
         self.att = None  # Field to store attention mask for later analysis
+        self.transfer = transfer
+        self.film_scale = nn.Parameter(torch.ones(self.out_channels))
+        self.film_bias = nn.Parameter(torch.zeros(self.out_channels))
+        
 
     def forward(self, enc, dec):
         """ Forward pass
@@ -429,10 +467,15 @@ class UpConv(nn.Module):
         y = self.norm2(y)
         y = self.act2(y)
         y = self.conv3(y)
+        y = self.norm3(y)
         y = self.act3(y + identity)
         
-        return y
-
+        if self.transfer:
+            scale = self.film_scale.unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4).expand_as(y)
+            bias = self.film_bias.unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4).expand_as(y)
+            return (scale * y) + bias
+        else:
+            return y
 
 class ResizeConv(nn.Module):
     """Upsamples by 2x and applies a convolution.
@@ -793,6 +836,7 @@ class UNetBottle(nn.Module):
             full_norm: bool = True,
             dim: int = 3,
             conv_mode: str = 'same',
+            transfer = False
     ):
         super().__init__()
 
@@ -847,6 +891,7 @@ class UNetBottle(nn.Module):
         self.conv_mode = conv_mode
         self.activation = activation
         self.dim = dim
+        self.transfer = transfer
 
         self.down_convs = nn.ModuleList()
         self.up_convs = nn.ModuleList()
@@ -878,6 +923,7 @@ class UNetBottle(nn.Module):
                 full_norm=full_norm,
                 dim=dim,
                 conv_mode=conv_mode,
+                transfer = self.transfer
             )
             self.down_convs.append(down_conv)
 
@@ -900,11 +946,17 @@ class UNetBottle(nn.Module):
                 full_norm=full_norm,
                 dim=dim,
                 conv_mode=conv_mode,
+                transfer = self.transfer
             )
             self.up_convs.append(up_conv)
         self.reduce_channels = conv1(outs*4, ## 4= experiment / len_seq_in
                                      self.out_channels, dim=dim)
-        self.dropout = nn.Dropout3d(0.4)  ## read this from config!
+        
+        self.region_clf = nn.Linear(outs*4, 3)
+        self.sigmoid = nn.Sigmoid()
+        self.softmax = nn.Softmax()
+        
+        self.dropout = nn.Dropout3d(0.2)  ## read this from config!
         self.apply(self.weight_init)
 
     @staticmethod
@@ -914,7 +966,9 @@ class UNetBottle(nn.Module):
         if isinstance(m, (nn.Conv3d, nn.Conv2d, nn.ConvTranspose3d, nn.ConvTranspose2d)):
             nn.init.xavier_normal_(m.weight)
             if getattr(m, 'bias') is not None:
-                nn.init.constant_(m.bias, 0)
+                nn.init.constant_(m.bias, 0)        
+    
+    
 
     def forward(self, x):
         encoder_outs = []
@@ -939,6 +993,11 @@ class UNetBottle(nn.Module):
         if VERBOSE: print("pre-reshape",x.shape)
         xs = x.shape;
         x = torch.reshape(x,(xs[0],xs[1]*xs[2],1,xs[3],xs[4]));
+        
+        x_ = F.adaptive_avg_pool3d(x, 1)
+        x_ = x_.reshape(xs[0], -1)
+        reg = self.softmax(self.region_clf(x_))
+        
         if VERBOSE: print("pre-reduce",x.shape)
         x = self.reduce_channels(x)
         if VERBOSE: print("post-reduce",x.shape)
@@ -948,7 +1007,8 @@ class UNetBottle(nn.Module):
             # Uncomment the following line to temporarily store output for
         #  receptive field estimation using fornoxai/receptivefield:
         # self.feature_maps = [x]  # Currently disabled to save memory
-        return x
+        
+        return x, reg
 
     @torch.jit.unused
     def forward_gradcp(self, x):
@@ -1027,7 +1087,7 @@ def test_model(
         )
 
     # Test forward, autograd, and backward pass with test input
-    out = model(x)
+    out, reg = model(x)
     loss = torch.sum(out)
     loss.backward()
     assert out.shape == expected_out_shape

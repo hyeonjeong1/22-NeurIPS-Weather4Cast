@@ -777,7 +777,7 @@ class UNet(nn.Module):
             planar_blocks: Sequence = (),
             batch_norm: str = 'unset',
             attention: bool = False,
-            activation: Union[str, nn.Module] = 'leaky',
+            activation: Union[str, nn.Module] = 'celu',
             normalization: str = 'batch',
             full_norm: bool = True,
             dim: int = 3,
