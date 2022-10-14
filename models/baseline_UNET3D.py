@@ -943,7 +943,8 @@ class UNet(nn.Module):
         # self.feature_maps = [x]  # Currently disabled to save memory
         xs = x.shape
         x_ = x.reshape(xs[0], -1)
-        reg = self.region_clf(x_)
+        reg = self.softmax(self.region_clf(x_))
+        print(reg.shape)
         return x, reg
 
     @torch.jit.unused
