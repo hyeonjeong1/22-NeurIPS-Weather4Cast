@@ -107,7 +107,18 @@ class UNetBottle_Lightning(pl.LightningModule):
         
     def freeze(self):
         """ freeze the model without film_layer and final_layer"""
-        for mn, m in self.model.named_modules():
+        ## if self.transfer is true, freeze only downconv
+        if self.transfer:
+          for m in self.model.down_convs:
+            for pn, p in m.named_parameters():
+                fpn = '%s.%s' % (mn, pn) if mn else pn # full param name
+                if pn.endswith('film_scale') or pn.endswith('film_bias') or ('reduce_channels' in fpn):
+                    p.requires_grad = True
+                    print(fpn)
+                else:
+                    p.requires_grad = False
+        else:
+          for mn, m in self.model.named_modules():
             for pn, p in m.named_parameters():
                 fpn = '%s.%s' % (mn, pn) if mn else pn # full param name
                 if pn.endswith('film_scale') or pn.endswith('film_bias') or ('reduce_channels' in fpn):
