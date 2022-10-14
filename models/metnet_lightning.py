@@ -138,7 +138,7 @@ class MetNet2_Lightning(pl.LightningModule):
 
         # todo: add the same plot as in `test_step`
 
-        if self.loss=="BCEWithLogitsLoss":
+        if self.loss=="BCEWithLogitsLoss" or self.loss=="DiceBCE":
             print("applying thresholds to y_hat logits")
             # set the logits threshold equivalent to sigmoid(x)>=0.5
             idx_gt0 = y_hat>=0
@@ -172,7 +172,7 @@ class MetNet2_Lightning(pl.LightningModule):
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
         loss = self._compute_loss(y_hat, y, mask=mask)
         ## todo: add the same plot as in `test_step`
-        if self.loss=="BCEWithLogitsLoss":
+        if self.loss=="BCEWithLogitsLoss" or self.loss=="DiceBCE":
             print("applying thresholds to y_hat logits")
             # set the logits threshold equivalent to sigmoid(x)>=0.5
             idx_gt0 = y_hat>=0
@@ -195,7 +195,7 @@ class MetNet2_Lightning(pl.LightningModule):
         mask = self.get_target_mask(metadata)
         if VERBOSE:
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
-        if self.loss=="BCEWithLogitsLoss":
+        if self.loss=="BCEWithLogitsLoss" or self.loss=="DiceBCE":
             print("applying thresholds to y_hat logits")
             # set the logits threshold equivalent to sigmoid(x)>=0.5
             idx_gt0 = y_hat>=0

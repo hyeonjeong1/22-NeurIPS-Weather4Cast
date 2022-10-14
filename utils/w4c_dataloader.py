@@ -89,7 +89,7 @@ class RainData(Dataset):
             self.out_ds = load_dataset(self.data_root, self.data_split, self.regions, self.output_product)
         else: 
             self.out_ds = []
-
+            
         self.reg2idx = {
           "boxi_0015": 0,
           "boxi_0034": 1,

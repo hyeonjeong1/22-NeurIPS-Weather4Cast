@@ -110,16 +110,18 @@ train:    # model training settings
   loss: DiceBCE
   pos_weight: 6.114572
   early_stopping: True
-  patience: 15
-  lr: 1e-4
-  weight_decay: 2e-2 
+  patience: 5
+  lr: 1e-6
+  weight_decay: 0
   init_filter_size: 32
+  transfer: True
   mixup: mixup
-  alpha: 0.2
+  alpha: 1.0
   cutmix_p: 1.0
+  freeze: False
 model:    # model definition settings
   model_name: 3D_UNET_base
-  in_channels: 11  
+  in_channels: 11
   gradient_clip_val: 2.0
   gradient_clip_algorithm: value
   attention: False

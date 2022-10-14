@@ -1,14 +1,14 @@
 experiment:  # Settings for the current experiment
-  name: 'U-NET-252-boxy_0076'  # name of the current experiment for logging
+  name: 'U-NET-252-boxy_0034-cutmix'  # name of the current experiment for logging
   experiment_folder: 'lightning_logs/'  # folder to save logs 
   sub_folder: 'baseline'  # logging sub-folder
   precision: 32  # bit precision of weights. 32 or 16 
   logging: True  # Toggle logging on/off
 dataset: 
-  generate_samples: False  # only needs to be done once to write sample names to pkl cache 
+  generate_samples: True  # only needs to be done once to write sample names to pkl cache 
   # Available bands: 'IR_016', 'IR_039', 'IR_087', 'IR_097', 'IR_108', 'IR_120', 'IR_134', 'VIS006', 'VIS008', 'WV_062', 'WV_073'
   sat_bands: ['IR_016', 'IR_039', 'IR_087', 'IR_097', 'IR_108', 'IR_120', 'IR_134', 'VIS006', 'VIS008', 'WV_062', 'WV_073']
-  regions: [ 'boxi_0076']
+  regions: ['boxi_0015', 'boxi_0034']
   # or, e.g., ['boxi_0015'] if you want to train your model for one region only
   input_product: REFL-BT 
   output_product: RATE 
@@ -19,9 +19,9 @@ dataset:
   size_target_center:  252 # 42*6;  
   len_seq_in: 4        # number of input slots per training sequence
   len_seq_predict: 32  # output slots; both still hard-coded in places!
-  data_root:  './data/2019'
-  splits_path: './data/timestamps_and_splits_2019.csv'
-  path_to_sample_ids: 'utils/cached_sample_ids/samples_IDs_2019_stage1_boxy_0076.pkl'  # path cache file for data splits
+  data_root:  '/home/taehyeon/jupyter/data/2019'
+  splits_path: '/home/taehyeon/jupyter/data/timestamps_and_splits_2019.csv'
+  path_to_sample_ids: 'utils/cached_sample_ids/samples_IDs_2019_stage1_boxy_1534.pkl'  # path cache file for data splits
 
   preprocess_OPERA:
     #  # var mean sd min median max length pos.weight.thr_0 
@@ -30,7 +30,7 @@ dataset:
       rainfall_rate-500X500: 
         mask: [-9999000.0, inf, nan, max128] #, 0range0.1] # Mostly used for loss function: values added here are added to a mask and not used for loss 
         map: [[lessthan0.001, 0], [greaterthan0.001, 1], [-8888000.0, 0], [-9999000.0, 0], [inf, 0], [nan, 0]]   #Mostly used for input preprocessing   # 1. map values 
-        mean_std: [0.10826048, 0.17174056]
+        mean_std: [0.07165331, 0.6302647]
         range: [0, 128]          # 2. we evaluate only pixels in this range
         standardise: False       # 3. use log(x+1) instead & normalize (x/max)
         bin: False     
@@ -50,73 +50,73 @@ dataset:
     IR_016: 
       map: [[inf, 0], [nan, 0]]
       range: [0, 1.02]
-      mean_std: [5.2514967e-02, 0.04173685]
+      mean_std: [0.06605569, 0.09920627]
       standardise: True 
     IR_039: 
       map: [[inf, 0], [nan, 0]]
       range: [0, 350]
-      mean_std: [2.7659204e+02, 11.3909025]
+      mean_std: [273.2187, 15.98847]
       standardise: True 
     IR_087: 
       map: [[inf, 0], [nan, 0]]
       range: [0, 350]
-      mean_std: [2.7273621e+02, 13.822776]
+      mean_std: [268.3977, 17.49075]
       standardise: True 
     IR_097: 
       map: [[inf, 0], [nan, 0]]
       range: [0, 350]
-      mean_std: [2.5023550e+02, 7.930472]
+      mean_std: [246.1366, 10.81174]
       standardise: True 
     IR_108: 
       map: [[inf, 0], [nan, 0]]
       range: [0, 350]
-      mean_std: [2.7438736e+02, 14.634432]
+      mean_std: [270.1535, 18.49373]
       standardise: True 
     IR_120: 
       map: [[inf, 0], [nan, 0]]
       range: [0, 350]
-      mean_std: [2.7294043e+02, 14.52799]
+      mean_std: [268.7993, 18.42736]
       standardise: True 
     IR_134: 
       map: [[inf, 0], [nan, 0]]
       range: [0, 350]
-      mean_std: [2.5380003e+02, 9.010054]
+      mean_std: [250.6491, 11.70623]
       standardise: True 
     VIS006: 
       map: [[inf, 0], [nan, 0]]
       range: [0, 1.02]
-      mean_std: [5.6765862e-02, 0.04504809]
+      mean_std: [0.06711527, 0.1101766]
       standardise: True 
     VIS008: 
       map: [[inf, 0], [nan, 0]]
       range: [0, 1.2]  
-      mean_std: [7.2215401e-02, 0.05534239]
+      mean_std: [0.08736397, 0.1326554]
       standardise: True 
     WV_062: 
       map: [[inf, 0], [nan, 0]]
       range: [0, 300]
-      mean_std: [2.3378894e+02, 4.267933]
+      mean_std: [232.1964, 5.531017]
       standardise: True 
     WV_073: 
       map: [[inf, 0], [nan, 0]]
       range: [0, 300]
-      mean_std: [2.5045076e+02, 7.335085]
+      mean_std: [248.0414, 9.495061]
       standardise: True
     
 train:    # model training settings
-  batch_size: 15
-  max_epochs: 20
+  batch_size: 36
+  max_epochs: 30
   n_workers: 8  # 8
   loss: DiceBCE
   pos_weight: 6.114572
   early_stopping: True
   patience: 5
   lr: 1e-6
-  weight_decay: 0
+  weight_decay: 0 
   init_filter_size: 32
   transfer: True
   mixup: mixup
-  alpha: 0.2
+  alpha: 1.0
   cutmix_p: 1.0
   freeze: False
 model:    # model definition settings
@@ -124,8 +124,7 @@ model:    # model definition settings
   in_channels: 11  
   gradient_clip_val: 2.0
   gradient_clip_algorithm: value
-  attention: False
 
 predict:  # model prediction settings
-  region_to_predict: boxi_0076  # must match one of the names defined in 'dataset' / 'regions'
+  region_to_predict: boxi_0034  # must match one of the names defined in 'dataset' / 'regions'
   year_to_predict: 2019

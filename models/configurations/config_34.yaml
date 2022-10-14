@@ -5,7 +5,7 @@ experiment:  # Settings for the current experiment
   precision: 32  # bit precision of weights. 32 or 16 
   logging: True  # Toggle logging on/off
 dataset: 
-  generate_samples: False  # only needs to be done once to write sample names to pkl cache 
+  generate_samples: True  # only needs to be done once to write sample names to pkl cache 
   # Available bands: 'IR_016', 'IR_039', 'IR_087', 'IR_097', 'IR_108', 'IR_120', 'IR_134', 'VIS006', 'VIS008', 'WV_062', 'WV_073'
   sat_bands: ['IR_016', 'IR_039', 'IR_087', 'IR_097', 'IR_108', 'IR_120', 'IR_134', 'VIS006', 'VIS008', 'WV_062', 'WV_073']
   regions: [ 'boxi_0034']
@@ -106,17 +106,19 @@ dataset:
 train:    # model training settings
   batch_size: 25
   max_epochs: 30
-  n_workers: 16  # 8
+  n_workers: 8  # 8
   loss: DiceBCE
   pos_weight: 6.114572
   early_stopping: True
-  patience: 15
-  lr: 1e-4
-  weight_decay: 2e-2 
+  patience: 5
+  lr: 1e-6
+  weight_decay: 0 
   init_filter_size: 32
+  transfer: True
   mixup: mixup
-  alpha: 0.2
+  alpha: 1.0
   cutmix_p: 1.0
+  freeze: False
 model:    # model definition settings
   model_name: 3D_UNET_base
   in_channels: 11  

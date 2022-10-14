@@ -29,22 +29,28 @@ import torch.nn.functional as F
 from utils.evaluate import *        
 from torch.autograd import Variable
 import numpy as np
+import copy
 # from utils.data_utils import mixup_data, mixup_criterion
+from torch.nn.functional import normalize
 
 #models
-from models.baseline_UNET3D import UNet as Base_UNET3D # 3_3_2 model selection
+from models.baseline_UNET3D_bottleneck import UNetBottle as Base_UNET3D # 3_3_2 model selection
 
 VERBOSE = False
-# VERBOSE = True
+#VERBOSE = True
 
-class UNet_Lightning(pl.LightningModule):
+class UNetBottle_Lightning(pl.LightningModule):
     def __init__(self, UNet_params: dict, params: dict,
                  **kwargs):
-        super(UNet_Lightning, self).__init__()
+        super(UNetBottle_Lightning, self).__init__()
 
         self.in_channels = params['in_channels']
         self.start_filts = params['init_filter_size']
-        self.model = Base_UNET3D(in_channels=self.in_channels,start_filts =  self.start_filts)
+        self.transfer = params['transfer']
+        self.model = Base_UNET3D(in_channels=self.in_channels,start_filts =  self.start_filts, transfer = self.transfer)
+        
+        if params['freeze'] == True: 
+            self.freeze()
 
         self.save_hyperparameters()
         self.params = params
@@ -59,6 +65,8 @@ class UNet_Lightning(pl.LightningModule):
         self.mixup = params['mixup']
         self.alpha = params['alpha']
         self.cutmix_prob = params['cutmix_p']
+        self.masking = False
+        self.mask_p = 0.9
 
         pos_weight = torch.tensor(params['pos_weight']);
         if VERBOSE: print("Positive weight:",pos_weight);
@@ -68,9 +76,10 @@ class UNet_Lightning(pl.LightningModule):
         self.loss_fn = {
             'smoothL1': nn.SmoothL1Loss(), 'L1': nn.L1Loss(), 'mse': F.mse_loss,
             'BCELoss': nn.BCELoss(), 
-            'BCEWithLogitsLoss': nn.BCEWithLogitsLoss(pos_weight=pos_weight), 'CrossEntropy': nn.CrossEntropyLoss(), 'DiceBCE': DiceBCELoss(weight=pos_weight), 'DiceLoss': DiceLoss()
+            'BCEWithLogitsLoss': nn.BCEWithLogitsLoss(pos_weight=pos_weight), 'CrossEntropy': nn.CrossEntropyLoss(), 'DiceBCE': DiceBCELoss(), 'DiceLoss': DiceLoss()
             }[self.loss]
-
+        
+        self.valid_loss_fn = DiceLoss()
         self.relu = nn.ReLU() # None
         t = f"============== n_workers: {params['n_workers']} | batch_size: {params['batch_size']} \n"+\
             f"============== loss: {self.loss} | weight: {pos_weight} (if using BCEwLL)"
@@ -94,6 +103,31 @@ class UNet_Lightning(pl.LightningModule):
         #     self.test_log[i-1].flush()
         #     self.test_cf[i-1].write('tn\tf\nfp\ntp')
         #     self.test_cf[i-1].flush()
+        
+        
+    def freeze(self):
+        """ freeze the model without film_layer and final_layer"""
+        ## if self.transfer is true, freeze only downconv
+        if self.transfer:
+          for m in self.model.down_convs:
+            for pn, p in m.named_parameters():
+                fpn = '%s.%s' % (mn, pn) if mn else pn # full param name
+                if pn.endswith('film_scale') or pn.endswith('film_bias') or ('reduce_channels' in fpn):
+                    p.requires_grad = True
+                    print(fpn)
+                else:
+                    p.requires_grad = False
+        else:
+          for mn, m in self.model.named_modules():
+            for pn, p in m.named_parameters():
+                fpn = '%s.%s' % (mn, pn) if mn else pn # full param name
+                if pn.endswith('film_scale') or pn.endswith('film_bias') or ('reduce_channels' in fpn):
+                    p.requires_grad = True
+                    print(fpn)
+                else:
+                    p.requires_grad = False
+        
+        
     
     def on_fit_start(self):
         """ create a placeholder to save the results of the metric per variable """
@@ -116,7 +150,8 @@ class UNet_Lightning(pl.LightningModule):
         #print("mask---->", mask.shape)
         return mask
     
-    def _compute_loss(self, y_hat, y, agg=True, mask=None, reg=None, r_idx=None):
+    
+    def _compute_valid_loss(self, y_hat, y, agg=True, mask=None):
         if mask is not None:
             y_hat = self.retrieve_only_valid_pixels(y_hat, mask)
             y = self.retrieve_only_valid_pixels(y, mask)
@@ -124,16 +159,26 @@ class UNet_Lightning(pl.LightningModule):
         # print(y_hat.shape, y_hat.min(), y_hat.max())
         # print(y.shape, y.min(), y.max())
         if agg:
-            if self.loss == "DiceBCE":
-              loss = self.loss_fn(y_hat, y, reg, r_idx)
-            else: loss = self.loss_fn(y_hat, y)
+            loss = self.valid_loss_fn(y_hat, y)
         else:
-            if self.loss == "DiceBCE":
-              loss = self.loss_fn(y_hat, y, reg, r_idx, reduction='none')
-            else: loss = self.loss_fn(y_hat, y, reduction='none')
+            loss = self.valid_loss_fn(y_hat, y, reduction='none')
         return loss
     
-    def mixup_data(self, x, y, metadata, alpha=1.0):
+    
+    def _compute_loss(self, y_hat, y, agg=True, mask=None, reg=None, r_idx=None, mode='train'):
+        if mask is not None:
+            y_hat = self.retrieve_only_valid_pixels(y_hat, mask)
+            y = self.retrieve_only_valid_pixels(y, mask)
+        # print("================================================================================")
+        # print(y_hat.shape, y_hat.min(), y_hat.max())
+        # print(y.shape, y.min(), y.max())
+        if agg:
+            loss = self.loss_fn(y_hat, y, reg, r_idx, mode=mode)
+        else:
+            loss = self.loss_fn(y_hat, y, reduction='none', mode=mode)
+        return loss
+    
+    def mixup_data(self, x, y, r_idx, metadata, alpha=1.0):
         '''Returns mixed inputs, pairs of targets, and lambda'''
         if alpha > 0:
             lam = np.random.beta(alpha, alpha)
@@ -145,8 +190,14 @@ class UNet_Lightning(pl.LightningModule):
 
         mixed_x = lam * x + (1 - lam) * x[index]
         y_a, y_b = y, y[index]
-        metadata['target']['mask'] = metadata['target']['mask'] | metadata['target']['mask'][index]
-        return mixed_x, y_a, y_b, metadata, lam
+        r_idx_a, r_idx_b = r_idx, r_idx[index]
+        
+        metadata_a = metadata
+        metadata_b = copy.deepcopy(metadata)
+        metadata_b['target']['mask'] = metadata['target']['mask'][index]
+        
+        # metadata['target']['mask'] = metadata['target']['mask'] | metadata['target']['mask'][index]
+        return mixed_x, y_a, y_b, r_idx_a, r_idx_b, metadata_a, metadata_b, lam
     
     def cutmix_data(self,x, y, metadata, alpha=1.0):
         if alpha > 0:
@@ -177,23 +228,35 @@ class UNet_Lightning(pl.LightningModule):
         
         return x, y, metadata
     
-    def _mixup_criterion(self, y_hat, y_a, y_b, lam, agg=True, mask=None):
-        if agg:
-            loss = lam * self.loss_fn(y_hat, y_a) + (1 - lam) * self.loss_fn(y_hat, y_b)
+    def _mixup_criterion(self, y_hat, y_a, y_b, reg, r_idx_a, r_idx_b, lam, agg=True, mask_a=None, mask_b=None):
+        if mask_a is not None:
+            y_hat_a = self.retrieve_only_valid_pixels(y_hat, mask_a)
+            y_a = self.retrieve_only_valid_pixels(y_a, mask_a)
         else:
-            loss = lam * self.loss_fn(y_hat, y_a, reduction='none') + (1 - lam) * self.loss_fn(y_hat, y_b, reduction='none')
+            y_hat_a = y_hat
+
+        if mask_b is not None:
+            y_hat_b = self.retrieve_only_valid_pixels(y_hat, mask_b)
+            y_b = self.retrieve_only_valid_pixels(y_b, mask_b)
+        else:
+            y_hat_b = y_hat
+        
+        if agg:
+            loss = lam * self.loss_fn(y_hat_a, y_a, reg, r_idx_a) + (1 - lam) * self.loss_fn(y_hat_b, y_b, reg, r_idx_b)
+        else:
+            loss = lam * self.loss_fn(y_hat_a, y_a, reg, r_idx_a, reduction='none') + (1 - lam) * self.loss_fn(y_hat_b, y_b, reg, r_idx_b, reduction='none')
             
         return loss
 
     def training_step(self, batch, batch_idx, phase='train'):
         x, y, metadata, r_idx  = batch
-        y_a, y_b, lam = None, None, None
+        y_a, y_b, r_idx_a, r_idx_b, lam = None, None, None, None, None
         
         r = np.random.rand(1)
             
         if self.mixup == 'mixup':
-            x, y_a, y_b, metadata, lam = self.mixup_data(x, y, metadata, self.alpha)
-            x, y_a, y_b = map(Variable, (x, y_a, y_b))
+            x, y_a, y_b, r_idx_a, r_idx_b, metadata_a, metadata_b, lam = self.mixup_data(x, y, r_idx, metadata, self.alpha)
+            x, y_a, y_b, r_idx_a, r_idx_b = map(Variable, (x, y_a, y_b, r_idx_a, r_idx_b))
         elif self.mixup == 'cutmix' and r < self.cutmix_prob:
             x, y, metadata = self.cutmix_data(x, y, metadata, self.alpha)
         
@@ -202,11 +265,28 @@ class UNet_Lightning(pl.LightningModule):
         y_hat, reg = self.forward(x)
         if VERBOSE:
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
-        mask = self.get_target_mask(metadata)
+        mask_a = self.get_target_mask(metadata_a)
+        mask_b = self.get_target_mask(metadata_b)
+        
+        if self.masking:
+            tmp = torch.rand(mask_a.shape, device=mask_a.device) > self.mask_p
+            tmp[y == 1] = 0
+            mask_a = mask_a + tmp
+            del tmp
+            
+            tmp = torch.rand(mask_b.shape, device=mask_b.device) > self.mask_p
+            tmp[y == 1] = 0
+            mask_b = mask_b + tmp
+            del tmp
+            
+        
         if self.mixup == 'mixup':
-            loss = self._mixup_criterion(y_hat, y_a, y_b, lam, mask=mask)
+            loss = self._mixup_criterion(y_hat, y_a, y_b, reg, r_idx_a, r_idx_b, lam, mask_a=mask_a, mask_b=mask_b)
         else: # cutmix also uses this loss function
-            loss = self._compute_loss(y_hat, y, mask=mask, reg=reg, r_idx=r_idx)
+            loss = self._compute_loss(y_hat, y, mask=mask)
+        
+        if not self.transfer:
+            loss += kor_reg(self.model)
             
         self.log(f'{phase}_loss', loss,batch_size=self.bs)
         return loss
@@ -214,7 +294,6 @@ class UNet_Lightning(pl.LightningModule):
     def validation_step(self, batch, batch_idx, phase='val'):
         #data_start = timer()
         x, y, metadata, r_idx  = batch
-        # print("validation step region idx shape: ", r_idx.shape)
         #data_end = timer()
         
         if VERBOSE:
@@ -223,27 +302,29 @@ class UNet_Lightning(pl.LightningModule):
         mask = self.get_target_mask(metadata)
         if VERBOSE:
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
-        if self.loss=="DiceBCE":
-          loss = self._compute_loss(y_hat, y, mask=mask, reg=reg, r_idx=r_idx)
-        else: loss = self._compute_loss(y_hat, y, mask=mask, r_idx=r_idx)
+
+        loss = self._compute_loss(y_hat, y, mask=mask, reg=reg, r_idx=r_idx, mode='valid')
+#         loss = self._compute_valid_loss(y_hat, y, mask=mask)
 
         # todo: add the same plot as in `test_step`
 
-        if self.loss=="BCEWithLogitsLoss" or self.loss=="DiceBCE":
-            # print("applying thresholds to y_hat logits")
+        if self.loss=="BCEWithLogitsLoss":
+            print("applying thresholds to y_hat logits")
             # set the logits threshold equivalent to sigmoid(x)>=0.5
             idx_gt0 = y_hat>=0
             y_hat[idx_gt0] = 1
             y_hat[~idx_gt0] = 0
-        elif self.loss=='DiceBCE':
+        elif self.loss=='DiceBCE' or self.loss == 'DiceLoss':
             idx_gt0 = y_hat>=0
             y_hat[idx_gt0] = 1
-            y_hat[~idx_gt0] = 0            
+            y_hat[~idx_gt0] = 0    
+            
 
 #         y shape: torch.Size([16, 1, 32, 252, 252]), y_hat shape: torch.Size([16, 1, 32, 252, 252])
+
         recall, precision, F1, acc, csi = recall_precision_f1_acc(y, y_hat)
         if self.params['logging']:
-            logs = write_temporal_recall_precision_f1_acc(y.squeeze(), y_hat.squeeze(),self.start_filts)
+            logs = write_temporal_recall_precision_f1_acc(y.squeeze(), y_hat.squeeze(),32)
         
         # for i in range(self.start_filts):
         #     self.valid_log[i].write(logs['log'][i])
@@ -258,6 +339,7 @@ class UNet_Lightning(pl.LightningModule):
         values = {'val_acc': acc, 'val_recall': recall, 'val_precision': precision, 'val_F1': F1, 'val_iou': iou, 'val_CSI': csi}
         self.log_dict(values, batch_size=self.bs)
     
+#         return csi
         return loss
 
     def validation_epoch_end(self, outputs, phase='val'):
@@ -276,20 +358,20 @@ class UNet_Lightning(pl.LightningModule):
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
         loss = self._compute_loss(y_hat, y, mask=mask)
         ## todo: add the same plot as in `test_step`
-        if self.loss=="BCEWithLogitsLoss" or self.loss=="DiceBCE":
+        if self.loss=="BCEWithLogitsLoss":
             print("applying thresholds to y_hat logits")
             # set the logits threshold equivalent to sigmoid(x)>=0.5
             idx_gt0 = y_hat>=0
             y_hat[idx_gt0] = 1
             y_hat[~idx_gt0] = 0
-        elif self.loss=='DiceBCE':
+        elif self.loss=='DiceBCE' or self.loss == 'DiceLoss':
             idx_gt0 = y_hat>=0
             y_hat[idx_gt0] = 1
             y_hat[~idx_gt0] = 0            
         
         recall, precision, F1, acc, csi = recall_precision_f1_acc(y, y_hat)
         if self.params['logging']:
-            logs=write_temporal_recall_precision_f1_acc(y.squeeze(), y_hat.squeeze(),self.start_filts, test=True)
+            logs=write_temporal_recall_precision_f1_acc(y.squeeze(), y_hat.squeeze(),32, test=True)
         # for i in range(self.start_filts):
         #     self.test_log[i].write(logs['log'][i])
         #     self.test_cf[i].write(logs['cf'][i])
@@ -307,19 +389,19 @@ class UNet_Lightning(pl.LightningModule):
         return 0, y_hat
 
     def predict_step(self, batch, batch_idx, phase='predict'):
-        x, y, metadata = batch
-        y_hat = self.model(x)
+        x, y, metadata, r_idx = batch
+        y_hat, reg = self.model(x)
         mask = self.get_target_mask(metadata)
         if VERBOSE:
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
-        if self.loss=="BCEWithLogitsLoss" or self.loss=="DiceBCE":
+        if self.loss=="BCEWithLogitsLoss":
             print("applying thresholds to y_hat logits")
             # set the logits threshold equivalent to sigmoid(x)>=0.5
             idx_gt0 = y_hat>=0
             y_hat[idx_gt0] = 1
             y_hat[~idx_gt0] = 0
-        elif self.loss=='DiceBCE':
-            idx_gt0 = y_hat>=-0.2
+        elif self.loss=='DiceBCE' or self.loss == 'DiceLoss':
+            idx_gt0 = y_hat>= 0
             y_hat[idx_gt0] = 1
             y_hat[~idx_gt0] = 0
         return y_hat
@@ -331,8 +413,8 @@ class UNet_Lightning(pl.LightningModule):
         decay = set()
         no_decay = set()
         # whitelist_weight_modules = (torch.nn.Linear, )
-        whitelist_weight_modules = (torch.nn.Linear, torch.nn.Conv2d, torch.nn.Conv3d, torch.nn.ConvTranspose3d, torch.nn.ConvTranspose2d)
-        blacklist_weight_modules = (torch.nn.GroupNorm, torch.nn.BatchNorm3d, torch.nn.BatchNorm2d, )
+        whitelist_weight_modules = (torch.nn.Conv2d, torch.nn.Conv3d, torch.nn.ConvTranspose3d, torch.nn.ConvTranspose2d)
+        blacklist_weight_modules = (torch.nn.Linear, torch.nn.GroupNorm, torch.nn.BatchNorm3d, torch.nn.BatchNorm2d, )
         for mn, m in self.model.named_modules():
             for pn, p in m.named_parameters():
                 fpn = '%s.%s' % (mn, pn) if mn else pn # full param name
@@ -346,6 +428,8 @@ class UNet_Lightning(pl.LightningModule):
                 elif pn.endswith('weight') and isinstance(m, blacklist_weight_modules):
                     # weights of blacklist modules will NOT be weight decayed
                     no_decay.add(fpn)
+                elif pn.endswith('film_scale') or pn.endswith('film_bias'):
+                    no_decay.add(fpn)
 
 
         # validate that we considered every parameter
@@ -355,17 +439,26 @@ class UNet_Lightning(pl.LightningModule):
         assert len(inter_params) == 0, "parameters %s made it into both decay/no_decay sets!" % (str(inter_params), )
         assert len(param_dict.keys() - union_params) == 0, "parameters %s were not separated into either decay/no_decay set!" \
                                                     % (str(param_dict.keys() - union_params), )
+        
+        decay_params = []
+        no_decay_params = [param_dict[pn] for pn in sorted(list(no_decay))]
+        
+        for pn in sorted(list(decay)):
+            if (param_dict[pn].shape == 5) and (param_dict[pn].shape[2] == 1):
+                no_decay_params.append(param_dict[pn])
+            else:
+                decay_params.append(param_dict[pn])
 
         # create the pytorch optimizer object
         optim_groups = [
-            {"params": [param_dict[pn] for pn in sorted(list(decay))], "weight_decay": float(self.params["weight_decay"])},
-            {"params": [param_dict[pn] for pn in sorted(list(no_decay))], "weight_decay": 0.0},
+            {"params": decay_params, "weight_decay": float(self.params["weight_decay"])},
+            {"params": no_decay_params, "weight_decay": 0},
         ]
             
         optimizer = torch.optim.AdamW(optim_groups,
                                      lr=float(self.params["lr"]))
         
-        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.96)
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=1.0)
         return [optimizer], [scheduler]
 
     def seq_metrics(self, y_true, y_pred):
@@ -405,39 +498,103 @@ class DiceLoss(nn.Module):
     def forward(self, targets, inputs, smooth=1):
         
         #comment out if your model contains a sigmoid or equivalent activation layer
-        inputs = F.sigmoid(inputs)       
+        inputs = F.sigmoid(inputs)    
         
         #flatten label and prediction tensors
         inputs = inputs.view(-1)
         targets = targets.view(-1)
         
+        idx_binary = targets > 0
+        targets[idx_binary] = 1.
+        targets[~idx_binary] = 0.
+        
         intersection = (inputs * targets).sum()      
-        print('intersection', intersection)
-        print('inputs', inputs.sum())
-        print('targets', targets.sum())                     
+#         print('intersection', intersection)
+#         print('inputs', inputs.sum())
+#         print('targets', targets.sum())                     
         dice = (2.*intersection + smooth)/(inputs.sum() + targets.sum() + smooth)  
+#         print("dice", dice)
 
         return 1 - dice
 
 class DiceBCELoss(nn.Module):
     def __init__(self, weight=None, size_average=True):
         super(DiceBCELoss, self).__init__()
-        self.weight = weight
 
-    def forward(self, inputs, targets, reg, r_idx, smooth=1):
-        # val, ind = torch.max(reg, dim=1)
-        CE_ = F.cross_entropy(reg, r_idx, reduction='mean')
+    def forward(self, inputs, targets, reg, r_idx, smooth=1, mode='train'):
+        
+        r_idx_label = nn.functional.one_hot(r_idx, num_classes=3)
+
+        
         #comment out if your model contains a sigmoid or equivalent activation layer
         inputs = F.sigmoid(inputs)       
         
         #flatten label and prediction tensors
         inputs = inputs.view(-1)
         targets = targets.view(-1)
-        # print(len(self.weight *len(inputs)))
         
         intersection = (inputs * targets).sum()                            
         dice_loss = 1 - (2.*intersection + smooth)/(inputs.sum() + targets.sum() + smooth)  
-        BCE = F.binary_cross_entropy(inputs, targets, reduction='mean')
-        Dice_BCE = BCE + dice_loss + CE_*0.5
+        reg_loss = F.binary_cross_entropy(reg.to(torch.float32), r_idx_label.to(torch.float32), reduction='mean')
+        BCE =  F.binary_cross_entropy(inputs, targets, reduction='mean') # + 0.1 * F.binary_cross_entropy(inputs, 1-targets, reduction='mean')
+
+        if mode == 'valid':
+            return dice_loss
+        else:
+            Dice_BCE =  0.9 * BCE + 1.1 * dice_loss # + 0.5* reg_loss
         
-        return Dice_BCE
+            return Dice_BCE 
+
+        
+def kor_reg(mdl, lamb=1.0):
+    # Consider the below facotrs.
+    # factor1: which kind layer (e.g., original(stem), pointwise, depthwise, fc_layer)
+    # factor2: power of regularization (i.e., lambda). Maybe, we should differ from each class of layer's lambda.
+    # How do we handle these?
+    # 'lamb_list' is a list of hyperparmeters for each class of layer. [origin_conv, pointwise, depthwise, fully coneected layer]
+    # 'lamb_list' length is 4.
+    # 'opt' : position of pointwise convolution. - expansion stage (exp), reduction stage (rec), both.
+    
+    l2_reg = None
+
+    for module in mdl.modules():
+        if isinstance(module, nn.Conv3d) or isinstance(module, nn.Linear):
+            if isinstance(module, nn.Conv3d):
+                if module.weight.shape[2] == 1:
+                    # pointwise conv
+                    W = module.weight
+            elif isinstance(module, nn.Linear):
+                # fully connected layer 
+                W = module.weight
+            else:
+                continue
+                
+            cols = W[0].numel()
+            w1 = W.view(-1, cols) # W.shape[1] * W.shape[0]
+            wt = torch.transpose(w1, 0, 1)
+            if W.shape[0]< W.shape[1]:
+                m = torch.matmul(wt, w1)
+                ident = Variable(torch.eye(cols, cols)).cuda()
+            else:
+                m = torch.matmul(w1, wt)
+                ident = Variable(torch.eye(m.shape[0], m.shape[0])).cuda()
+   
+            
+            w_tmp = m-ident
+            height = w_tmp.size(0)
+            u = normalize(w_tmp.new_empty(height).normal_(0,1), dim=0, eps=1e-12)
+            v = normalize(torch.matmul(w_tmp.t(), u), dim=0, eps=1e-12)
+            u = normalize(torch.matmul(w_tmp, v), dim=0, eps=1e-12)
+            sigma = torch.dot(u, torch.matmul(w_tmp, v))**2
+            
+            if l2_reg is None:
+                l2_reg = lamb * sigma
+                num = 1
+            else:
+                l2_reg += lamb * sigma
+                num += 1
+        else:
+            continue
+    
+
+    return l2_reg/num
