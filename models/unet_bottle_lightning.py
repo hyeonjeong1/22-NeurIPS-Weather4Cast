@@ -49,8 +49,8 @@ class UNetBottle_Lightning(pl.LightningModule):
         self.transfer = params['transfer']
         self.model = Base_UNET3D(in_channels=self.in_channels,start_filts =  self.start_filts, transfer = self.transfer)
         
-        if params['freeze'] == True: 
-            self.freeze()
+        if params['freeze']: 
+            self.freeze(params['freeze'])
 
         self.save_hyperparameters()
         self.params = params
@@ -105,19 +105,20 @@ class UNetBottle_Lightning(pl.LightningModule):
         #     self.test_cf[i-1].flush()
         
         
-    def freeze(self):
-        """ freeze the model without film_layer and final_layer"""
-        ## if self.transfer is true, freeze only downconv
-        if self.transfer:
-          for m in self.model.down_convs:
+    def freeze(self, option):
+        if option == "upconv":
+           ## if self.transfer is true, freeze only upconv
+          for m in self.model.up_convs:
             for pn, p in m.named_parameters():
-                fpn = '%s.%s' % (mn, pn) if mn else pn # full param name
-                if pn.endswith('film_scale') or pn.endswith('film_bias') or ('reduce_channels' in fpn):
-                    p.requires_grad = True
-                    print(fpn)
-                else:
-                    p.requires_grad = False
-        else:
+                # fpn = '%s.%s' % (mn, pn) if mn else pn # full param name
+                # if pn.endswith('film_scale') or pn.endswith('film_bias') or ('reduce_channels' in fpn):
+                #     p.requires_grad = True
+                #     print(fpn)
+                # else:
+                #     p.requires_grad = False
+                p.requires_grad = False
+        elif option == '~film_final':
+          """ freeze the model without film_layer and final_layer"""
           for mn, m in self.model.named_modules():
             for pn, p in m.named_parameters():
                 fpn = '%s.%s' % (mn, pn) if mn else pn # full param name

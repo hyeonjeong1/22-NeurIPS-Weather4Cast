@@ -269,7 +269,7 @@ def set_parser():
                          help="Set the name of the experiment")
     parser.add_argument("-l", "--logging", action='store_true',
                         help="wandb logging true or not")
-    parser.add_argument("--freeze", action='store_true', help='transfer freeze')
+    parser.add_argument("--freeze", type=str, required=False, default='', help='freeze [upconv] or all except film&final layer [~film_final]')
 
     return parser
 
@@ -280,7 +280,7 @@ def main():
     torch.set_num_threads(64)
     params = update_params_based_on_args(options)
     params['freeze'] = options.freeze
-    print(params['freeze'])
+    print("freeze: ", params['freeze'])
     
     train(params, options.gpus, options.mode, options.checkpoint)
 
