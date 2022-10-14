@@ -83,36 +83,43 @@ def write_temporal_recall_precision_f1_acc(y, y_hat, time_dim, test=False):
     y, y_hat = [np.asarray(o) for o in [y, y_hat]]
     
     logs = {'log':[], 'cf':[]}
-    
+    tn, fp, fn, tp = 0, 0, 0, 0
 #     [16, 32, 252, 252]
     for i in range(time_dim):
-      if int(i)%4==3:
+      # if int(i)%4==3:
         cm = get_confusion_matrix(y[:, i, :, :].ravel(), y_hat[:, i, :, :].ravel())
         if len(cm)==4:
-            tn, fp, fn, tp = cm
-            recall, precision, F1 = 0, 0, 0
+            tmp_tn, tmp_fp, tmp_fn, tmp_tp = cm
+            tn += tmp_tn
+            fp += tmp_fp
+            fn += tmp_fn
+            tp += tmp_tp
 
-            if (tp + fn) > 0:
-                recall = tp / (tp + fn)
+    recall, precision, F1 = 0, 0, 0
 
-            if (tp + fp) > 0:
-                precision = tp / (tp + fp)
+    if (tp + fn) > 0:
+        recall = tp / (tp + fn)
 
-            if (precision + recall) > 0:
-                F1 = 2 * (precision * recall) / (precision + recall)
+    if (tp + fp) > 0:
+        precision = tp / (tp + fp)
 
-            if (tp + fn + fp) > 0: 
-                csi = tp / (tp + fn + fp)
+    if (precision + recall) > 0:
+        F1 = 2 * (precision * recall) / (precision + recall)
 
-            acc = (tn + tp) / (tn+fp+fn+tp)
+    if (tp + fn + fp) > 0: 
+        csi = tp / (tp + fn + fp)
+
+    acc = (tn + tp) / (tn+fp+fn+tp)
         
             # logs['log'].append(f'{recall}\t{precision}\t{F1}\t{csi}\t{acc}\n')
             # logs['cf'].append(f'{tn}\t{fn}\n{fp}\t{tp}\n')
-            if test:
-              wandb.log({"recall_t": recall, "precision_t": precision, "F1_t": F1, "csi_t": csi, "acc_t": acc, "tn_t": tn, "fn_t": fn, "fp_t": fp, "tp_t": tp})
-            else:
-              wandb.log({"recall": recall, "precision": precision, "F1": F1, "csi": csi, "acc": acc, "tn": tn, "fn": fn, "fp": fp, "tp": tp})
+    if test:
+        wandb.log({"recall_t": recall, "precision_t": precision, "F1_t": F1, "csi_t": csi, "acc_t": acc, "tn_t": tn, "fn_t": fn, "fp_t": fp, "tp_t": tp})
+    else:
+        wandb.log({"recall": recall, "precision": precision, "F1": F1, "csi": csi, "acc": acc, "tn": tn, "fn": fn, "fp": fp, "tp": tp})
     return logs
+
+
 SMOOTH = 1e-6
 def iou_class(y_pred: t.Tensor, y_true: t.Tensor):
     #y_true, y_pred = [o.cpu() for o in [y_true, y_pred]]

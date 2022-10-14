@@ -1,5 +1,5 @@
 experiment:  # Settings for the current experiment
-  name: 'Res-U-Net'  # name of the current experiment for logging
+  name: 'U-NET-252-boxy_0034-cutmix'  # name of the current experiment for logging
   experiment_folder: 'lightning_logs/'  # folder to save logs 
   sub_folder: 'baseline'  # logging sub-folder
   precision: 32  # bit precision of weights. 32 or 16 
@@ -8,7 +8,7 @@ dataset:
   generate_samples: True  # only needs to be done once to write sample names to pkl cache 
   # Available bands: 'IR_016', 'IR_039', 'IR_087', 'IR_097', 'IR_108', 'IR_120', 'IR_134', 'VIS006', 'VIS008', 'WV_062', 'WV_073'
   sat_bands: ['IR_016', 'IR_039', 'IR_087', 'IR_097', 'IR_108', 'IR_120', 'IR_134', 'VIS006', 'VIS008', 'WV_062', 'WV_073']
-  regions: ['boxi_0034', 'boxi_0015', 'boxi_0076']
+  regions: ['boxi_0015', 'boxi_0034']
   # or, e.g., ['boxi_0015'] if you want to train your model for one region only
   input_product: REFL-BT 
   output_product: RATE 
@@ -21,7 +21,7 @@ dataset:
   len_seq_predict: 32  # output slots; both still hard-coded in places!
   data_root:  '/home/taehyeon/jupyter/data/2019'
   splits_path: '/home/taehyeon/jupyter/data/timestamps_and_splits_2019.csv'
-  path_to_sample_ids: 'utils/cached_sample_ids/samples_IDs_2019_stage1.pkl'  # path cache file for data splits
+  path_to_sample_ids: 'utils/cached_sample_ids/samples_IDs_2019_stage1_boxy_1534.pkl'  # path cache file for data splits
 
   preprocess_OPERA:
     #  # var mean sd min median max length pos.weight.thr_0 
@@ -104,23 +104,23 @@ dataset:
       standardise: True
     
 train:    # model training settings
-  batch_size: 48 # 20 36
-  max_epochs: 50
+  batch_size: 36
+  max_epochs: 30
   n_workers: 8  # 8
   loss: DiceBCE
   pos_weight: 6.114572
   early_stopping: True
-  patience: 50
-  lr: 1e-4
-  weight_decay: 1e-2
+  patience: 5
+  lr: 1e-6
+  weight_decay: 0 
   init_filter_size: 32
-  transfer: False
+  transfer: True
   mixup: mixup
-  alpha: 0.5
+  alpha: 1.0
   cutmix_p: 1.0
   freeze: False
 model:    # model definition settings
-  model_name: 3D_ResUNet
+  model_name: 3D_UNET_base
   in_channels: 11  
   gradient_clip_val: 2.0
   gradient_clip_algorithm: value

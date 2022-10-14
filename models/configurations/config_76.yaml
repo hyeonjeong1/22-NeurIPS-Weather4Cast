@@ -19,8 +19,8 @@ dataset:
   size_target_center:  252 # 42*6;  
   len_seq_in: 4        # number of input slots per training sequence
   len_seq_predict: 32  # output slots; both still hard-coded in places!
-  data_root:  './data/2019'
-  splits_path: './data/timestamps_and_splits_2019.csv'
+  data_root:  '/home/taehyeon/jupyter/data/2019'
+  splits_path: '/home/taehyeon/jupyter/data/timestamps_and_splits_2019.csv'
   path_to_sample_ids: 'utils/cached_sample_ids/samples_IDs_2019_stage1_boxy_0076.pkl'  # path cache file for data splits
 
   preprocess_OPERA:
@@ -106,17 +106,19 @@ dataset:
 train:    # model training settings
   batch_size: 25
   max_epochs: 30
-  n_workers: 16  # 8
+  n_workers: 8  # 8
   loss: DiceBCE
   pos_weight: 6.114572
   early_stopping: True
-  patience: 15
-  lr: 1e-4
-  weight_decay: 2e-2 
+  patience: 5
+  lr: 1e-6
+  weight_decay: 0
   init_filter_size: 32
+  transfer: True
   mixup: mixup
   alpha: 0.2
   cutmix_p: 1.0
+  freeze: False
 model:    # model definition settings
   model_name: 3D_UNET_base
   in_channels: 11  

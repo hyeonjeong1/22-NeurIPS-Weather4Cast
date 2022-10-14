@@ -35,6 +35,7 @@ import torch
 import wandb
 
 from models.unet_lightning import UNet_Lightning as UNetModel
+from models.unet_bottle_lightning import UNetBottle_Lightning as UNetBModel
 from utils.data_utils import load_config
 from utils.data_utils import get_cuda_memory_usage
 from utils.data_utils import tensor_to_submission_file
@@ -60,7 +61,7 @@ class DataModule(pl.LightningDataModule):
                         batch_size=self.training_params['batch_size'],
                         num_workers=self.training_params['n_workers'],
                         shuffle=shuffle, pin_memory=pin, prefetch_factor=2,
-                        persistent_workers=False)
+                        persistent_workers=True)
         return dl
     
     def train_dataloader(self):
@@ -81,7 +82,7 @@ def load_model(Model, params, checkpoint_path=''):
         model = Model(params['model'], p)            
     else:
         print(f'-> Loading model checkpoint: {checkpoint_path}')
-        model = Model.load_from_checkpoint(checkpoint_path, UNet_params=params['model'], params=p)
+        model = Model.load_from_checkpoint(checkpoint_path, UNet_params=params['model'], params=p, strict=False)
     return model
 
 def get_trainer(gpus,params):
@@ -125,7 +126,7 @@ def get_trainer(gpus,params):
     trainer = pl.Trainer(gpus=gpus, max_epochs=max_epochs,
                          gradient_clip_val=params['model']['gradient_clip_val'],
                          gradient_clip_algorithm=params['model']['gradient_clip_algorithm'],
-                         accelerator=paralel_training,
+                         accelerator='gpu',
                          callbacks=callback_funcs,logger=tb_logger,
                          profiler='simple',precision=params['experiment']['precision'],
                          plugins=ddppplugin,
@@ -142,12 +143,13 @@ def do_predict(trainer, model, predict_params, test_data):
 def do_test(trainer, model, test_data):
     scores = trainer.test(model, dataloaders=test_data)
 
-def train(params, gpus, mode, checkpoint_path, model=UNetModel): 
+def train(params, gpus, mode, checkpoint_path, model=UNetBModel): 
+# def train(params, gpus, mode, checkpoint_path, model=UNetModel):
     """ main training/evaluation method
     """
     # wandb
-    # if params['logging']:
-      # wandb.init(project=params['model']['model_name'], name=params['experiment']['name'],  entity="w4c")
+    if params['logging']:
+        wandb.init(project=params['model']['model_name'], name=params['experiment']['name'],  entity="w4c")
     
     # ------------
     # model & data
@@ -156,7 +158,7 @@ def train(params, gpus, mode, checkpoint_path, model=UNetModel):
     data = DataModule(params['dataset'], params['train'], mode)
     model = load_model(model, params, checkpoint_path)
     if params['logging']:
-      wandb.watch(model)
+        wandb.watch(model)
     # ------------
     # Add your models here
     # ------------
@@ -227,14 +229,19 @@ def set_parser():
                          help="Set the name of the experiment")
     parser.add_argument("-l", "--logging", action='store_true',
                         help="wandb logging true or not")
+    parser.add_argument("--freeze", action='store_true', help='transfer freeze')
 
     return parser
 
 def main():
     parser = set_parser()
     options = parser.parse_args()
-
+    print(torch.get_num_threads())
+    torch.set_num_threads(64)
     params = update_params_based_on_args(options)
+    params['freeze'] = options.freeze
+    print(params['freeze'])
+    
     train(params, options.gpus, options.mode, options.checkpoint)
 
 if __name__ == "__main__":
