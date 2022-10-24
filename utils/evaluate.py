@@ -35,7 +35,7 @@ def get_confusion_matrix(y_true, y_pred):
 
     Returns:
         confusion matrix
-    """    
+    """   
     return confusion_matrix(y_true, y_pred).ravel()
 
 def recall_precision_f1_acc(y, y_hat):
@@ -56,7 +56,7 @@ def recall_precision_f1_acc(y, y_hat):
     # pytorch to numpy
     y, y_hat = [o.cpu() for o in [y, y_hat]]
     y, y_hat = [np.asarray(o) for o in [y, y_hat]]
-
+    print(y, y_hat)
     cm = get_confusion_matrix(y.ravel(), y_hat.ravel())
     if len(cm)==4:
         tn, fp, fn, tp = cm

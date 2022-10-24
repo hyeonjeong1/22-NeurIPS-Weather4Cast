@@ -33,6 +33,7 @@ import torch
 import os
 
 VERBOSE = False
+# VERBOSE = True
 
 #__________________________________________________CREATING/LOADING SAMPLE IDS____________________________________________________
 
@@ -156,7 +157,9 @@ def get_training_idxs(df, len_seq_in, len_seq_predict, data_split, region):
     #non testing 
     for i in range(df.shape[0] - len_seq_in - len_seq_predict + 1):
         in_seq = [i + j for j in range(len_seq_in)]
+        # for offset in range(len_seq_predict):
         out_seq = [i + len_seq_in + j for j in range(len_seq_predict)]
+          # out_seq = [i+len_seq_in + offset]
         #print([in_seq, out_seq, region])
         idxs.append([in_seq, out_seq, region])
     return idxs
@@ -420,7 +423,13 @@ def preprocess_fn(x, preprocess, verbose=False):
                 less_v = float(q.partition('lessthan')[2])
                 x[x<less_v] = v
         else:  x[x==q] = v
-    if verbose: print(1, np.unique(x, return_counts=True))
+    
+    ## 1' Map values by categorical bin
+    if len(preprocess['map'])==0:
+      bins = np.arange(0,128, 0.2)
+      for i, j in enumerate(bins):
+        x[np.where((x>=j) & (x<(j+0.02)))] = i
+      if verbose: print(1, np.unique(x, return_counts=True))
 
     # 2 Clip values out of range
     m, M = preprocess['range']
@@ -482,7 +491,7 @@ def preprocess_OPERA(x, preprocess, verbose=False):
     if preprocess['bin']: 
         bins = np.arange(0,128, 0.2)
         x = np.digitize(x, bins)
-    if verbose: print(3, np.unique(x, return_counts=True))
+    if VERBOSE: print(3, np.unique(x, return_counts=True))
     return x
 
 #__________________________________GENERAL HELPER FUNCTIONS__________________________________

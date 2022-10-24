@@ -26,7 +26,7 @@
 
 
 VERBOSE=False
-# VERBOSE=True
+VERBOSE=True
 
 __all__ = ['UNetBottle']
 
@@ -836,7 +836,8 @@ class UNetBottle(nn.Module):
             full_norm: bool = True,
             dim: int = 3,
             conv_mode: str = 'same',
-            transfer = False
+            transfer = False,
+            categorize: bool = False,
     ):
         super().__init__()
 
@@ -892,9 +893,12 @@ class UNetBottle(nn.Module):
         self.activation = activation
         self.dim = dim
         self.transfer = transfer
+        self.categorize = categorize
+        print(self.categorize)
 
         self.down_convs = nn.ModuleList()
         self.up_convs = nn.ModuleList()
+        
 
         if batch_norm != 'unset':
             raise RuntimeError(
@@ -958,6 +962,8 @@ class UNetBottle(nn.Module):
         
         self.dropout = nn.Dropout3d(0.2)  ## read this from config!
         self.apply(self.weight_init)
+        if self.categorize:
+          self.cate_layer = nn.Linear(1, 128*5)
 
     @staticmethod
     def weight_init(m):
@@ -994,16 +1000,34 @@ class UNetBottle(nn.Module):
         xs = x.shape;
         x = torch.reshape(x,(xs[0],xs[1]*xs[2],1,xs[3],xs[4]));
         
-        x_ = F.adaptive_avg_pool3d(x, 1)
-        x_ = x_.reshape(xs[0], -1)
+        ## Region classifier
+        x_ = F.adaptive_avg_pool3d(x, 1) #B, T, C, 1, H, W
+        x_ = x_.reshape(xs[0], -1) # B, TC
         reg = self.softmax(self.region_clf(x_))
         
-        if VERBOSE: print("pre-reduce",x.shape)
+        if VERBOSE: print("pre-reduce",x.shape) # B, C', 1, H, W
         x = self.reduce_channels(x)
-        if VERBOSE: print("post-reduce",x.shape)
+        if VERBOSE: print("post-reduce",x.shape) #B, T, 1, H, W
         xs = x.shape;
-        x = torch.reshape(x,(xs[0],1,xs[1],xs[3],xs[4]));
-        if VERBOSE: print("post-reshape",x.shape)
+        x = torch.reshape(x,(xs[0],1,xs[1],xs[3],xs[4])); 
+        if VERBOSE: print("post-reshape",x.shape) #B, 1, T, H, W
+
+        # # ## 1 to 512 channel
+        if self.categorize:
+          x = torch.swapaxes(x, 2, 1)
+          x = torch.swapaxes(x, 3, 2)
+          x = torch.swapaxes(x, 4, 3)
+          if VERBOSE: print("post-swapaxes",x.shape) #B, T, H, W, 640
+          x = self.cate_layer(x)
+          x = self.softmax(x)
+
+          # x = torch.swapaxes(x, 3, 4)
+          # x = torch.swapaxes(x, 2, 3)
+          # x = torch.swapaxes(x, 1, 2)
+          # if VERBOSE: print("return-swapaxes",x.shape) #B, 640, T, H, W
+
+          
+
             # Uncomment the following line to temporarily store output for
         #  receptive field estimation using fornoxai/receptivefield:
         # self.feature_maps = [x]  # Currently disabled to save memory
@@ -1032,14 +1056,15 @@ class UNetBottle(nn.Module):
 
 def test_model(
     batch_size=1,
-    in_channels=1,
-    out_channels=2,
-    n_blocks=3,
+    in_channels=11,
+    out_channels=32,
+    n_blocks=6,
     planar_blocks=(),
     merge_mode='concat',
     dim=3
 ):
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    # device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    device=torch.device('cpu')
     model = UNetBottle(
         in_channels=in_channels,
         out_channels=out_channels,
@@ -1057,17 +1082,23 @@ def test_model(
         x = torch.randn(
             batch_size,
             in_channels,
-            2 ** n_blocks // (2 ** len(planar_blocks)),
-            2 ** n_blocks,
-            2 ** n_blocks,
+            4,
+            252,
+            252,
+            # 2 ** n_blocks // (2 ** len(planar_blocks)),
+            # 2 ** n_blocks,
+            # 2 ** n_blocks,
             device=device
         )
         expected_out_shape = (
             batch_size,
             out_channels,
-            2 ** n_blocks // (2 ** len(planar_blocks)),
-            2 ** n_blocks,
-            2 ** n_blocks
+            4,
+            252,
+            252,
+            # 2 ** n_blocks // (2 ** len(planar_blocks)),
+            # 2 ** n_blocks,
+            # 2 ** n_blocks
         )
     elif dim == 2:
         # Each block in the encoder pathway ends with 2x2 downsampling
@@ -1115,8 +1146,8 @@ if __name__ == '__main__':
     # m = UNet3dLite()
     # x = torch.randn(1, 1, 22, 140, 140)
     # m(x)
-    test_2d_config()
-    print()
+    # test_2d_config()
+    # print()
     test_planar_configs()
     print('All tests sucessful!')
     # # TODO: Also test valid convolution architecture.

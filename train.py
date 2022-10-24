@@ -94,7 +94,7 @@ def get_trainer(gpus,params):
      """
     max_epochs=params['train']['max_epochs'];
     print("Trainig for",max_epochs,"epochs");
-    checkpoint_callback = ModelCheckpoint(monitor='val_loss_epoch', save_top_k=3, save_last=True,
+    checkpoint_callback = ModelCheckpoint(monitor='val_loss_epoch', save_top_k=-1, save_last=None,
                                           filename='{epoch:02d}-{val_loss_epoch:.6f}')
     
     paralel_training = None
@@ -280,7 +280,6 @@ def main():
     torch.set_num_threads(64)
     params = update_params_based_on_args(options)
     params['freeze'] = options.freeze
-    print("freeze: ", params['freeze'])
     
     train(params, options.gpus, options.mode, options.checkpoint)
 
