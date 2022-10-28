@@ -426,15 +426,17 @@ def preprocess_fn(x, preprocess, verbose=False):
     
     ## 1' Map values by categorical bin
     if len(preprocess['map'])==0:
-      bins = np.arange(0,128, 0.2)
-      for i, j in enumerate(bins):
-        x[np.where((x>=j) & (x<(j+0.02)))] = i
+      # bins = np.arange(0,128, 1.0)
+      # for i, j in enumerate(bins):
+      #   x[np.where((x>=j) & (x<(j+0.02)))] = i
+      x[np.where(x < 0.001)] = 0
+      x[np.where(x >= 0.001)] = 1
       if verbose: print(1, np.unique(x, return_counts=True))
 
     # 2 Clip values out of range
     m, M = preprocess['range']
     x[x<m] = m
-    x[x>M] = M
+    x[x>M] = 1
     if verbose: print(2, np.unique(x, return_counts=True))
     
     return x, M
@@ -481,7 +483,7 @@ def preprocess_OPERA(x, preprocess, verbose=False):
     """    
     # 1, 2
     if verbose: print("OPERA file:") 
-    x, M = preprocess_fn(x, preprocess, verbose=verbose)
+    x, M = preprocess_fn(x, preprocess)
     
     # 3 - mean_std - standardisation
     if preprocess['standardise']:  
@@ -489,9 +491,9 @@ def preprocess_OPERA(x, preprocess, verbose=False):
         x = x - mean
         x = x/stdev
     if preprocess['bin']: 
-        bins = np.arange(0,128, 0.2)
-        x = np.digitize(x, bins)
-    if VERBOSE: print(3, np.unique(x, return_counts=True))
+        bins = np.arange(0,128, 1.0)
+        x = np.digitize(x, bins) - 1
+    if VERBOSE: print(3, np.unique(x, return_counts=True), x.shape)
     return x
 
 #__________________________________GENERAL HELPER FUNCTIONS__________________________________

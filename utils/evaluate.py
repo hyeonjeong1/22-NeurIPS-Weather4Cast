@@ -56,7 +56,6 @@ def recall_precision_f1_acc(y, y_hat):
     # pytorch to numpy
     y, y_hat = [o.cpu() for o in [y, y_hat]]
     y, y_hat = [np.asarray(o) for o in [y, y_hat]]
-    print(y, y_hat)
     cm = get_confusion_matrix(y.ravel(), y_hat.ravel())
     if len(cm)==4:
         tn, fp, fn, tp = cm
@@ -75,7 +74,8 @@ def recall_precision_f1_acc(y, y_hat):
             csi = tp / (tp + fn + fp)
 
         acc = (tn + tp) / (tn+fp+fn+tp)
-
+    else:
+      recall, precision, F1, acc, csi = 0,0,0,0,0
     return recall, precision, F1, acc, csi
 
 def write_temporal_recall_precision_f1_acc(y, y_hat, time_dim, test=False):

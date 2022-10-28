@@ -86,6 +86,7 @@ def load_model(Model, params, checkpoint_path=''):
     else:
         print(f'-> Loading model checkpoint: {checkpoint_path}')
         model = Model.load_from_checkpoint(checkpoint_path, UNet_params=params['model'], params=p, strict=False)
+        
     return model
 
 def get_trainer(gpus,params):
@@ -141,6 +142,7 @@ def get_trainer(gpus,params):
 def do_predict(trainer, model, predict_params, test_data):
     scores = trainer.predict(model, dataloaders=test_data)
     scores = torch.concat(scores)   
+    print(scores.shape)
     tensor_to_submission_file(scores,predict_params)
 
 def do_test(trainer, model, test_data):

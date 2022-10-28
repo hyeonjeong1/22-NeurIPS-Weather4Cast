@@ -39,8 +39,8 @@ os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 from models.baseline_UNET3D_bottleneck import UNetBottle as Base_UNET3D # 3_3_2 model selection
 
 VERBOSE = False
-VERBOSE = True
-
+# VERBOSE = True
+# 
 class UNetBottle_Lightning(pl.LightningModule):
     def __init__(self, UNet_params: dict, params: dict,
                  **kwargs):
@@ -81,6 +81,9 @@ class UNetBottle_Lightning(pl.LightningModule):
             'BCELoss': nn.BCELoss(), 
             'BCEWithLogitsLoss': nn.BCEWithLogitsLoss(pos_weight=pos_weight), 'CrossEntropy': nn.CrossEntropyLoss(), 'DiceBCE': DiceBCELoss(), 'DiceLoss': DiceLoss()
             }[self.loss]
+        if self.categorize:
+          self.loss_fn = nn.CrossEntropyLoss()
+          self.loss = 'CrossEntropy'
         
         self.valid_loss_fn = DiceLoss()
         self.relu = nn.ReLU() # None
@@ -107,8 +110,7 @@ class UNetBottle_Lightning(pl.LightningModule):
         #     self.test_log[i-1].flush()
         #     self.test_cf[i-1].write('tn\tf\nfp\ntp')
         #     self.test_cf[i-1].flush()
-        
-        
+         
     def freeze(self, option):
         if option == "upconv":
            ## if self.transfer is true, freeze only upconv
@@ -125,8 +127,7 @@ class UNetBottle_Lightning(pl.LightningModule):
                     print(fpn)
                 else:
                     p.requires_grad = False
-        
-        
+      
     
     def on_fit_start(self):
         """ create a placeholder to save the results of the metric per variable """
@@ -138,7 +139,7 @@ class UNetBottle_Lightning(pl.LightningModule):
         #if self.loss =='BCELoss':
         #x = self.relu(x)
         if self.categorize:
-          assert x.shape[-1] == 128*5, x.shape
+          assert x.shape[1] == 2, x.shape
         return x, reg
 
     def retrieve_only_valid_pixels(self, x, m):
@@ -157,23 +158,36 @@ class UNetBottle_Lightning(pl.LightningModule):
             y_hat = self.retrieve_only_valid_pixels(y_hat, mask)
             y = self.retrieve_only_valid_pixels(y, mask)
         # print("================================================================================")
-        print(y_hat.shape, y_hat.min(), y_hat.max())
-        print(y.shape, y.min(), y.max())
+        # print(y_hat.shape, y_hat.min(), y_hat.max())
+        # print(y.shape, y.min(), y.max())
         if agg:
             loss = self.valid_loss_fn(y_hat, y)
         else:
             loss = self.valid_loss_fn(y_hat, y, reduction='none')
         return loss
-    
+
+    def _compute_loss_categorize(self, y_hat, y):
+        # print("================================================================================")
+        # print(y_hat.shape, y_hat.min(), y_hat.max())
+        # print(y.shape, y.min(), y.max())
+        # print(y_hat.get_device(), y.get_device())
+        y = torch.squeeze(y, dim=1) 
+        # print(y.max(), y.min(), y_hat.max(), y_hat.min())
+        # criterion = nn.CrossEntropyLoss(reduction='none')
+
+        loss = self.loss_fn(y_hat, y)
+        
+        # if VERBOSE: print("loss shape: ", loss.shape)
+        return loss
     
     def _compute_loss(self, y_hat, y, agg=True, mask=None, reg=None, r_idx=None, mode='train'):
         if mask is not None:
 
             y_hat = self.retrieve_only_valid_pixels(y_hat, mask)
             y = self.retrieve_only_valid_pixels(y, mask)
-        print("================================================================================")
-        print(y_hat.shape, y_hat.min(), y_hat.max())
-        print(y.shape, y.min(), y.max())
+        # print("================================================================================")
+        # print(y_hat.shape, y_hat.min(), y_hat.max())
+        # print(y.shape, y.min(), y.max())
         if agg:
             loss = self.loss_fn(y_hat, y, reg, r_idx, mode=mode, categorize=self.categorize)
         else:
@@ -266,7 +280,7 @@ class UNetBottle_Lightning(pl.LightningModule):
             print('x', x.shape, 'y', y.shape, '----------------- batch')
         y_hat, reg = self.forward(x)
         if self.categorize:
-          assert y_hat.shape[-1] == 128*5, y_hat.shape
+          assert y_hat.shape[1] == 2, y_hat.shape
         if VERBOSE:
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
 
@@ -287,10 +301,10 @@ class UNetBottle_Lightning(pl.LightningModule):
         
         if self.mixup == 'mixup':
             loss = self._mixup_criterion(y_hat, y_a, y_b, reg, r_idx_a, r_idx_b, lam, mask_a=mask_a, mask_b=mask_b)
-        else: # cutmix also uses this loss function
-            if self.categorize:
-              loss = self._compute_loss(y_hat, y, mask=None, reg=reg, r_idx=r_idx, mode='valid')
-            else: loss = self._compute_loss(y_hat, y, mask=mask)
+        elif self.categorize:
+              loss = self._compute_loss_categorize(y_hat, y)
+              # loss = self._compute_loss(y_hat, y, mask=None, reg=reg, r_idx=r_idx, mode='valid')
+        else: loss = self._compute_loss(y_hat, y, mask=mask) #cutmix
         
         if not self.transfer:
             loss += kor_reg(self.model)
@@ -307,13 +321,13 @@ class UNetBottle_Lightning(pl.LightningModule):
             print('x', x.shape, 'y', y.shape, '----------------- batch')
         y_hat, reg = self.forward(x)
         if self.categorize:
-          assert y_hat.shape[-1] == 128*5, y_hat.shape
+          assert y_hat.shape[1] == 2, y_hat.shape
         mask = self.get_target_mask(metadata)
         if VERBOSE:
             print(torch.unique(y[:,0,:,:,:], return_counts=True)) #0~128
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
         if self.categorize:
-          loss = self._compute_loss(y_hat, y, mask=None, reg=reg, r_idx=r_idx, mode='valid')
+          loss = self._compute_loss_categorize(y_hat, y)
         else:
           loss = self._compute_loss(y_hat, y, mask=mask, reg=reg, r_idx=r_idx, mode='valid')
 #         loss = self._compute_valid_loss(y_hat, y, mask=mask)
@@ -326,23 +340,34 @@ class UNetBottle_Lightning(pl.LightningModule):
             y_hat[idx_gt0] = 1
             y_hat[~idx_gt0] = 0
         elif self.loss=='DiceBCE' or self.loss == 'DiceLoss':
-            if self.categorize:
-              assert y_hat.shape[-1] == 128*5, y_hat.shape
-              # y_hat, ind = torch.topk(y_hat, 1, dim=1)
-              y_hat, ind = torch.max(y_hat, dim=-1)
-              # print(y_hat.shape)
-              # if VERBOSE: print("before applying threshold, y hat ", torch.unique(y_hat[:,:,:,:], return_counts=True))
-              # threshold = 0.07165331
-            else:
-              threshold = 0
-              idx_gt0 = y_hat>=threshold
-              y_hat[idx_gt0] = 1
-              y_hat[~idx_gt0] = 0    
-        # if VERBOSE: print("after applying threshold, y hat ", torch.unique(y_hat[:,:,:,:], return_counts=True))
-          
-              recall, precision, F1, acc, csi = recall_precision_f1_acc(y, y_hat)
-              if self.params['logging']:
-                  logs = write_temporal_recall_precision_f1_acc(y.squeeze(), y_hat.squeeze(),32)
+            threshold = 0
+            idx_gt0 = y_hat>=threshold
+            y_hat[idx_gt0] = 1
+            y_hat[~idx_gt0] = 0    
+        elif self.loss == 'CrossEntropy':
+            self.model.cate_layer.weight.div_(torch.norm(self.model.cate_layer.weight, p=5, dim=-1, keepdim=True))
+            y_hat, reg = self.model(x) # B, 128, 32, 252, 252
+            # print("apply softmax")
+            y_hat = torch.nn.functional.softmax(y_hat, dim=1)
+            # print(y_hat[0,:,0,0,0])
+
+            s = y_hat.shape
+            flatten = y_hat.view(s[0], s[1], -1)
+            val, ind = flatten.max(1)
+            # print(val[0,:], ind[0,:])
+
+            # ind = torch.argmax(y_hat, dim=1)
+            # if VERBOSE: print(ind.shape, torch.unique(ind, return_counts=True))
+            y_hat = ind.view(s[0], 1, 32, 252, 252)
+            # if VERBOSE: print(y_hat.shape)
+            # print(torch.unique(y_hat, return_counts=True))
+            threshold = 0 
+            idx_gt0 = y_hat>threshold
+            y_hat[idx_gt0] = 1
+            y_hat[~idx_gt0] = 0   
+        recall, precision, F1, acc, csi = recall_precision_f1_acc(y, y_hat)
+              # if self.params['logging']:
+              #     logs = write_temporal_recall_precision_f1_acc(y.squeeze(), y_hat.squeeze(),32)
         
         # for i in range(self.start_filts):
         #     self.valid_log[i].write(logs['log'][i])
@@ -353,9 +378,9 @@ class UNetBottle_Lightning(pl.LightningModule):
         iou = iou_class(y_hat, y)
 
         #LOGGING
-        # self.log(f'{phase}_loss', loss,batch_size=self.bs)
-        # values = {'val_acc': acc, 'val_recall': recall, 'val_precision': precision, 'val_F1': F1, 'val_iou': iou, 'val_CSI': csi}
-        # self.log_dict(values, batch_size=self.bs)
+        self.log(f'{phase}_loss', loss,batch_size=self.bs)
+        values = {'val_acc': acc, 'val_recall': recall, 'val_precision': precision, 'val_F1': F1, 'val_iou': iou, 'val_CSI': csi}
+        self.log_dict(values, batch_size=self.bs)
     
 #         return csi
         return loss
@@ -385,7 +410,31 @@ class UNetBottle_Lightning(pl.LightningModule):
         elif self.loss=='DiceBCE' or self.loss == 'DiceLoss':
             idx_gt0 = y_hat>=0
             y_hat[idx_gt0] = 1
-            y_hat[~idx_gt0] = 0            
+            y_hat[~idx_gt0] = 0     
+        elif self.loss == 'CrossEntropy':
+            self.model.cate_layer.weight.div_(torch.norm(self.model.cate_layer.weight, p=5, dim=-1, keepdim=True))
+            y_hat, reg = self.model(x) # B, 128, 32, 252, 252
+            # print("apply softmax")
+            y_hat = torch.nn.functional.softmax(y_hat, dim=1)
+            # print(y_hat[0,:,0,0,0])
+
+            s = y_hat.shape
+            flatten = y_hat.view(s[0], s[1], -1)
+            val, ind = flatten.max(1)
+            # print(val[0,:], ind[0,:])
+
+            # ind = torch.argmax(y_hat, dim=1)
+            # if VERBOSE: print(ind.shape, torch.unique(ind, return_counts=True))
+            y_hat = ind.view(s[0], 1, 32, 252, 252)
+            # if VERBOSE: print(y_hat.shape)
+            # print(torch.unique(y_hat, return_counts=True))
+            threshold = 0 
+            idx_gt0 = y_hat>threshold
+            y_hat[idx_gt0] = 1
+            y_hat[~idx_gt0] = 0   
+            recall, precision, F1, acc, csi = recall_precision_f1_acc(y, y_hat)
+              # if self.params['logging']:
+              #     logs = write_temporal_recall_precision_f1_acc(y.squeeze(), y_hat.squeeze(),32)       
         
         recall, precision, F1, acc, csi = recall_precision_f1_acc(y, y_hat)
         if self.params['logging']:
@@ -408,7 +457,7 @@ class UNetBottle_Lightning(pl.LightningModule):
 
     def predict_step(self, batch, batch_idx, phase='predict'):
         x, y, metadata, r_idx = batch
-        y_hat, reg = self.model(x)
+        y_hat, reg = self.model(x) # B, 128, 32, 252, 252
         mask = self.get_target_mask(metadata)
         if VERBOSE:
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
@@ -422,6 +471,30 @@ class UNetBottle_Lightning(pl.LightningModule):
             idx_gt0 = y_hat>= 0
             y_hat[idx_gt0] = 1
             y_hat[~idx_gt0] = 0
+        elif self.loss == 'CrossEntropy':
+            self.model.cate_layer.weight.div_(torch.norm(self.model.cate_layer.weight, p=5, dim=-1, keepdim=True))
+            y_hat, reg = self.model(x) # B, 128, 32, 252, 252
+            # print("apply softmax")
+            y_hat = torch.nn.functional.softmax(y_hat, dim=1)
+            # print(y_hat[0,:,0,0,0])
+
+            s = y_hat.shape
+            flatten = y_hat.view(s[0], s[1], -1)
+            val, ind = flatten.max(1)
+            # print(val[0,:], ind[0,:])
+
+            # ind = torch.argmax(y_hat, dim=1)
+            # if VERBOSE: print(ind.shape, torch.unique(ind, return_counts=True))
+            y_hat = ind.view(s[0], 1, 32, 252, 252)
+            # if VERBOSE: print(y_hat.shape)
+            # print(torch.unique(y_hat, return_counts=True))
+            threshold = 0 
+            idx_gt0 = y_hat>threshold
+            y_hat[idx_gt0] = 1
+            y_hat[~idx_gt0] = 0   
+            y_hat = y_hat.float()
+            if VERBOSE: print(y_hat.shape, torch.unique(y_hat, return_counts=True))
+            
         return y_hat
 
     def configure_optimizers(self):
@@ -543,8 +616,7 @@ class DiceBCELoss(nn.Module):
         r_idx_label = nn.functional.one_hot(r_idx, num_classes=3)
 
         if categorize:
-          assert inputs.shape[-1] == 128*5, inputs.shape
-          print(inputs.get_device())
+          assert inputs.shape[1] == 2, inputs.shape
           # inputs_, ind = torch.topk(inputs, 1, dim=-1)
           inputs, ind = torch.max(inputs, dim=-1)
           # assert inputs.shape == targets.shape, (inputs.shape, targets.shape)
@@ -569,6 +641,7 @@ class DiceBCELoss(nn.Module):
             Dice_BCE =  0.9 * BCE + 1.1 * dice_loss # + 0.5* reg_loss
         
             return Dice_BCE 
+            
 
         
 def kor_reg(mdl, lamb=1.0):

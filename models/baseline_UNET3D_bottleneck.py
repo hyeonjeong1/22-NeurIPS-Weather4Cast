@@ -26,7 +26,7 @@
 
 
 VERBOSE=False
-VERBOSE=True
+# VERBOSE=True
 
 __all__ = ['UNetBottle']
 
@@ -299,6 +299,7 @@ class DownConv(nn.Module):
             scale = self.film_scale.unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4).expand_as(before_pool)
             bias = self.film_bias.unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4).expand_as(before_pool)
             before_pool = (scale * before_pool) + bias
+        if VERBOSE: print("downconv forward ", y.shape)
         
         return y, before_pool
 
@@ -469,6 +470,7 @@ class UpConv(nn.Module):
         y = self.conv3(y)
         y = self.norm3(y)
         y = self.act3(y + identity)
+        if VERBOSE: print("upconv forward: ", y.shape)
         
         if self.transfer:
             scale = self.film_scale.unsqueeze(0).unsqueeze(2).unsqueeze(3).unsqueeze(4).expand_as(y)
@@ -894,7 +896,6 @@ class UNetBottle(nn.Module):
         self.dim = dim
         self.transfer = transfer
         self.categorize = categorize
-        print(self.categorize)
 
         self.down_convs = nn.ModuleList()
         self.up_convs = nn.ModuleList()
@@ -954,7 +955,7 @@ class UNetBottle(nn.Module):
             )
             self.up_convs.append(up_conv)
         self.reduce_channels = conv1(outs*4, ## 4= experiment / len_seq_in
-                                     self.out_channels, dim=dim)
+                                     self.out_channels, dim=dim) # 128 -> 32
         
         self.region_clf = nn.Linear(outs*4, 3)
         self.sigmoid = nn.Sigmoid()
@@ -963,7 +964,7 @@ class UNetBottle(nn.Module):
         self.dropout = nn.Dropout3d(0.2)  ## read this from config!
         self.apply(self.weight_init)
         if self.categorize:
-          self.cate_layer = nn.Linear(1, 128*5)
+          self.cate_layer = nn.Conv3d(128, 32*2, kernel_size=1, bias=False)
 
     @staticmethod
     def weight_init(m):
@@ -996,7 +997,7 @@ class UNetBottle(nn.Module):
             i += 1
 
         # No softmax is used, so you need to apply it in the loss.
-        if VERBOSE: print("pre-reshape",x.shape)
+        if VERBOSE: print("pre-reshape",x.shape)# B, 32, 4, H, W
         xs = x.shape;
         x = torch.reshape(x,(xs[0],xs[1]*xs[2],1,xs[3],xs[4]));
         
@@ -1005,26 +1006,33 @@ class UNetBottle(nn.Module):
         x_ = x_.reshape(xs[0], -1) # B, TC
         reg = self.softmax(self.region_clf(x_))
         
-        if VERBOSE: print("pre-reduce",x.shape) # B, C', 1, H, W
-        x = self.reduce_channels(x)
-        if VERBOSE: print("post-reduce",x.shape) #B, T, 1, H, W
-        xs = x.shape;
-        x = torch.reshape(x,(xs[0],1,xs[1],xs[3],xs[4])); 
-        if VERBOSE: print("post-reshape",x.shape) #B, 1, T, H, W
-
-        # # ## 1 to 512 channel
+        if VERBOSE: print("pre-reduce",x.shape) # B, 128, 1, H, W
         if self.categorize:
-          x = torch.swapaxes(x, 2, 1)
-          x = torch.swapaxes(x, 3, 2)
-          x = torch.swapaxes(x, 4, 3)
-          if VERBOSE: print("post-swapaxes",x.shape) #B, T, H, W, 640
           x = self.cate_layer(x)
-          x = self.softmax(x)
+          if VERBOSE: print("post cate layer ", x.shape ) # 128 -> 128*32
+        else:
+          x = self.reduce_channels(x) # 128 -> 32
+          if VERBOSE: print("post-reduce",x.shape) #B, 32, 1, H, W
+        xs = x.shape;
+        if self.categorize:
+          x = torch.reshape(x, (xs[0], 2, 32, xs[3], xs[4])) #B, 128, 32, H, W
+          if VERBOSE: print("post-reshape", x.shape)
+        else:
+          x = torch.reshape(x,(xs[0],1,xs[1],xs[3],xs[4])); 
+          if VERBOSE: print("post-reshape",x.shape) #B, 1, 32, H, W
 
-          # x = torch.swapaxes(x, 3, 4)
-          # x = torch.swapaxes(x, 2, 3)
-          # x = torch.swapaxes(x, 1, 2)
-          # if VERBOSE: print("return-swapaxes",x.shape) #B, 640, T, H, W
+        # # # ## 1 to 512 channel
+        # if self.categorize:
+        #   x = torch.swapaxes(x, 2, 1)
+        #   x = torch.swapaxes(x, 3, 2)
+        #   x = torch.swapaxes(x, 4, 3)
+        #   if VERBOSE: print("post-swapaxes",x.shape) #B, T, H, W, bin
+        #   x = self.cate_layer(x)
+
+        #   x = torch.swapaxes(x, 3, 4)
+        #   x = torch.swapaxes(x, 2, 3)
+        #   x = torch.swapaxes(x, 1, 2)
+        #   if VERBOSE: print("return-swapaxes",x.shape) #B, bin, T, H, W
 
           
 
