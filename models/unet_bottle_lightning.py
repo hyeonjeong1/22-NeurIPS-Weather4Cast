@@ -76,16 +76,14 @@ class UNetBottle_Lightning(pl.LightningModule):
 
         self.loss = params['loss']
         self.bs = params['batch_size']
+        # kwargs = {"weight": 0.2, "gamma": 2.0, "reduction": 'mean'}
         self.loss_fn = {
             'smoothL1': nn.SmoothL1Loss(), 'L1': nn.L1Loss(), 'mse': F.mse_loss,
             'BCELoss': nn.BCELoss(), 
-            'BCEWithLogitsLoss': nn.BCEWithLogitsLoss(pos_weight=pos_weight), 'CrossEntropy': nn.CrossEntropyLoss(), 'DiceBCE': DiceBCELoss(), 'DiceLoss': DiceLoss()
+            'BCEWithLogitsLoss': nn.BCEWithLogitsLoss(pos_weight=pos_weight), 'CrossEntropy': nn.CrossEntropyLoss(), 'DiceBCE': DiceBCELoss(), 'DiceLoss': DiceLoss(), 'FocalLoss': FocalLoss(weight=torch.FloatTensor(params['loss_weight'])),
             }[self.loss]
-        if self.categorize:
-          self.loss_fn = nn.CrossEntropyLoss()
-          self.loss = 'CrossEntropy'
         
-        self.valid_loss_fn = DiceLoss()
+        # self.valid_loss_fn = DiceLoss()
         self.relu = nn.ReLU() # None
         
         t = f"============== n_workers: {params['n_workers']} | batch_size: {params['batch_size']} \n"+\
@@ -365,6 +363,21 @@ class UNetBottle_Lightning(pl.LightningModule):
             idx_gt0 = y_hat>threshold
             y_hat[idx_gt0] = 1
             y_hat[~idx_gt0] = 0   
+        elif self.loss == 'FocalLoss':
+            y_hat, reg = self.model(x) # B, 2, 32, 252, 252
+            # print("apply softmax")
+            y_hat = torch.nn.functional.softmax(y_hat, dim=1)
+            # print(y_hat[0,:,0,0,0])
+
+            s = y_hat.shape
+            flatten = y_hat.view(s[0], s[1], -1)
+            val, ind = flatten.max(1)
+            # print(val[0,:], ind[0,:])
+
+            # ind = torch.argmax(y_hat, dim=1)
+            if VERBOSE: print(ind.shape, torch.unique(ind, return_counts=True))
+            y_hat = ind.view(s[0], 1, 32, 252, 252)
+ 
         recall, precision, F1, acc, csi = recall_precision_f1_acc(y, y_hat)
               # if self.params['logging']:
               #     logs = write_temporal_recall_precision_f1_acc(y.squeeze(), y_hat.squeeze(),32)
@@ -432,9 +445,20 @@ class UNetBottle_Lightning(pl.LightningModule):
             idx_gt0 = y_hat>threshold
             y_hat[idx_gt0] = 1
             y_hat[~idx_gt0] = 0   
-            recall, precision, F1, acc, csi = recall_precision_f1_acc(y, y_hat)
-              # if self.params['logging']:
-              #     logs = write_temporal_recall_precision_f1_acc(y.squeeze(), y_hat.squeeze(),32)       
+        elif self.loss == 'FocalLoss':
+            y_hat, reg = self.model(x) # B, 2, 32, 252, 252
+            # print("apply softmax")
+            y_hat = torch.nn.functional.softmax(y_hat, dim=1)
+            # print(y_hat[0,:,0,0,0])
+
+            s = y_hat.shape
+            flatten = y_hat.view(s[0], s[1], -1)
+            val, ind = flatten.max(1)
+            # print(val[0,:], ind[0,:])
+
+            # ind = torch.argmax(y_hat, dim=1)
+            if VERBOSE: print(ind.shape, torch.unique(ind, return_counts=True))
+            y_hat = ind.view(s[0], 1, 32, 252, 252)     
         
         recall, precision, F1, acc, csi = recall_precision_f1_acc(y, y_hat)
         if self.params['logging']:
@@ -492,9 +516,23 @@ class UNetBottle_Lightning(pl.LightningModule):
             idx_gt0 = y_hat>threshold
             y_hat[idx_gt0] = 1
             y_hat[~idx_gt0] = 0   
-            y_hat = y_hat.float()
-            if VERBOSE: print(y_hat.shape, torch.unique(y_hat, return_counts=True))
             
+            if VERBOSE: print(y_hat.shape, torch.unique(y_hat, return_counts=True))
+        elif self.loss == 'FocalLoss':
+            y_hat, reg = self.model(x) # B, 2, 32, 252, 252
+            # print("apply softmax")
+            y_hat = torch.nn.functional.softmax(y_hat, dim=1)
+            # print(y_hat[0,:,0,0,0])
+
+            s = y_hat.shape
+            flatten = y_hat.view(s[0], s[1], -1)
+            val, ind = flatten.max(1)
+            # print(val[0,:], ind[0,:])
+
+            # ind = torch.argmax(y_hat, dim=1)
+            if VERBOSE: print(ind.shape, torch.unique(ind, return_counts=True))
+            y_hat = ind.view(s[0], 1, 32, 252, 252) 
+        y_hat = y_hat.float()
         return y_hat
 
     def configure_optimizers(self):
@@ -642,8 +680,232 @@ class DiceBCELoss(nn.Module):
         
             return Dice_BCE 
             
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+from typing import Optional
 
+def label_to_one_hot_label(
+    labels: torch.Tensor,
+    num_classes: int,
+    device: Optional[torch.device] = None,
+    dtype: Optional[torch.dtype] = None,
+    eps: float = 1e-6,
+    ignore_index=255,
+) -> torch.Tensor:
+    r"""Convert an integer label x-D tensor to a one-hot (x+1)-D tensor.
+
+    Args:
+        labels: tensor with labels of shape :math:`(N, *)`, where N is batch size.
+          Each value is an integer representing correct classification.
+        num_classes: number of classes in labels.
+        device: the desired device of returned tensor.
+        dtype: the desired data type of returned tensor.
+
+    Returns:
+        the labels in one hot tensor of shape :math:`(N, C, *)`,
+
+    Examples:
+        >>> labels = torch.LongTensor([
+                [[0, 1], 
+                [2, 0]]
+            ]) #(1, 2, 2)
+        >>> one_hot(labels, num_classes=3)
+        tensor([[[[1.0000e+00, 1.0000e-06],
+                  [1.0000e-06, 1.0000e+00]],
         
+                 [[1.0000e-06, 1.0000e+00],
+                  [1.0000e-06, 1.0000e-06]],
+        
+                 [[1.0000e-06, 1.0000e-06],
+                  [1.0000e+00, 1.0000e-06]]]]) #(1, 3, 2, 2)
+
+    """
+    shape = labels.shape #(B, 32, 252, 252)
+    # one hot : (B, C=ignore_index+1, H, W)
+    one_hot = torch.zeros((shape[0], ignore_index+1) + shape[1:], device=device, dtype=dtype)
+    
+    # labels : (B, H, W) -> (B, 32, 252, 252)
+    # labels.unsqueeze(1) : (B, C=1, H, W) -> (B, 1, 32, 252, 252)
+    # one_hot : (B, C=ignore_index+1, H, W)
+    print(labels.unsqueeze(1).shape)
+    one_hot = one_hot.scatter_(1, labels.unsqueeze(1), 1.0) + eps
+    
+    # ret : (B, C=num_classes, H, W) -> (B, 2, 32, 252, 252)
+    ret = torch.split(one_hot, [num_classes, ignore_index+1-num_classes], dim=1)[0]
+
+    
+    return ret
+
+
+# https://github.com/zhezh/focalloss/blob/master/focalloss.py
+def focal_loss(input, target, alpha, gamma, reduction, eps, ignore_index):
+    
+    r"""Criterion that computes Focal loss.
+
+    According to :cite:`lin2018focal`, the Focal loss is computed as follows:
+
+    .. math::
+
+        \text{FL}(p_t) = -\alpha_t (1 - p_t)^{\gamma} \, \text{log}(p_t)
+
+    Where:
+       - :math:`p_t` is the model's estimated probability for each class.
+
+    Args:
+        input: logits tensor with shape :math:`(N, C, *)` where C = number of classes.
+        target: labels tensor with shape :math:`(N, *)` where each value is :math:`0 ≤ targets[i] ≤ C−1`.
+        alpha: Weighting factor :math:`\alpha \in [0, 1]`.
+        gamma: Focusing parameter :math:`\gamma >= 0`.
+        reduction: Specifies the reduction to apply to the
+          output: ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction
+          will be applied, ``'mean'``: the sum of the output will be divided by
+          the number of elements in the output, ``'sum'``: the output will be
+          summed.
+        eps: Scalar to enforce numerical stabiliy.
+
+    Return:
+        the computed loss.
+
+    Example:
+        >>> N = 5  # num_classes
+        >>> input = torch.randn(1, N, 3, 5, requires_grad=True)
+        >>> target = torch.empty(1, 3, 5, dtype=torch.long).random_(N)
+        >>> output = focal_loss(input, target, alpha=0.5, gamma=2.0, reduction='mean')
+        >>> output.backward()
+    """
+    if not isinstance(input, torch.Tensor):
+        raise TypeError(f"Input type is not a torch.Tensor. Got {type(input)}")
+
+    if not len(input.shape) >= 2:
+        raise ValueError(f"Invalid input shape, we expect BxCx*. Got: {input.shape}")
+
+    if input.size(0) != target.size(0):
+        raise ValueError(f'Expected input batch_size ({input.size(0)}) to match target batch_size ({target.size(0)}).')
+
+    # input : (B, C, H, W) -> (B, bin, T, H, W)
+    n = input.size(0) # B
+    
+    # out_sie : (B, H, W) -> (B, T, H, W)
+    out_size = input.size()[0:1] + input.size()[3:]
+    
+    # input : (B, C, H, W) -> (B, bin, T, H, W)
+    # target : (B, H, W) -> (B, T, H, W)
+    if target.size()[1:] != input.size()[2:]:
+        raise ValueError(f'Expected target size {out_size}, got {target.size()}')
+
+    if not input.device == target.device:
+        raise ValueError(f"input and target must be in the same device. Got: {input.device} and {target.device}")
+    
+    if isinstance(alpha, float):
+        pass
+    elif isinstance(alpha, np.ndarray):
+        alpha = torch.from_numpy(alpha)
+        # alpha : (B, C, H, W)
+        alpha = alpha.view(-1, len(alpha), 1, 1).expand_as(input)
+    elif isinstance(alpha, torch.Tensor):
+        # alpha : (B, C, H, W)
+        alpha = alpha.view(-1, len(alpha), 1, 1).expand_as(input)       
+        
+
+    # compute softmax over the classes axis
+    # input_soft : (B, C, H, W) -> (B, C, T, H, W)
+    input_soft = F.softmax(input, dim=1) + eps
+    
+    # create the labels one hot tensor
+    # target_one_hot : (B, C, H, W) -> (B, C, T, H, W)
+    if VERBOSE: print(torch.unique(target, return_counts=True))
+    target_one_hot = label_to_one_hot_label(target.long(), num_classes=input.shape[1], device=input.device, dtype=input.dtype, ignore_index=ignore_index)
+    print("target_one_hot shape ", target_one_hot.shape)
+
+    # compute the actual focal loss
+    weight = torch.pow(1.0 - input_soft, gamma)
+    
+    # alpha, weight, input_soft : (B, C, H, W)
+    # focal : (B, C, H, W)
+    focal = -alpha * weight * torch.log(input_soft)
+    
+    # loss_tmp : (B, H, W)
+    loss_tmp = torch.sum(target_one_hot * focal, dim=1)
+
+    if reduction == 'none':
+        # loss : (B, H, W)
+        loss = loss_tmp
+    elif reduction == 'mean':
+        # loss : scalar
+        loss = torch.mean(loss_tmp)
+    elif reduction == 'sum':
+        # loss : scalar
+        loss = torch.sum(loss_tmp)
+    else:
+        raise NotImplementedError(f"Invalid reduction mode: {reduction}")
+    return loss
+
+
+class _FocalLoss(nn.Module):
+    r"""Criterion that computes Focal loss.
+
+    According to :cite:`lin2018focal`, the Focal loss is computed as follows:
+
+    .. math:
+
+        FL(p_t) = -alpha_t(1 - p_t)^{gamma}, log(p_t)
+
+    Where:
+       - :math:`p_t` is the model's estimated probability for each class.
+
+    Args:
+        alpha: Weighting factor :math:`\alpha \in [0, 1]`.
+        gamma: Focusing parameter :math:`\gamma >= 0`.
+        reduction: Specifies the reduction to apply to the
+          output: ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction
+          will be applied, ``'mean'``: the sum of the output will be divided by
+          the number of elements in the output, ``'sum'``: the output will be
+          summed.
+        eps: Scalar to enforce numerical stabiliy.
+
+    Shape:
+        - Input: :math:`(N, C, *)` where C = number of classes.
+        - Target: :math:`(N, *)` where each value is
+          :math:`0 ≤ targets[i] ≤ C−1`.
+
+    Example:
+        >>> N = 5  # num_classes
+        >>> kwargs = {"alpha": 0.5, "gamma": 2.0, "reduction": 'mean'}
+        >>> criterion = FocalLoss(**kwargs)
+        >>> input = torch.randn(1, N, 3, 5, requires_grad=True)
+        >>> target = torch.empty(1, 3, 5, dtype=torch.long).random_(N)
+        >>> output = criterion(input, target)
+        >>> output.backward()
+    """
+
+    def __init__(self, alpha, gamma = 2.0, reduction = 'mean', eps = 1e-8, ignore_index=30):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+        self.eps = eps
+        self.ignore_index = ignore_index
+
+    def forward(self, input, target):
+        return focal_loss(input, target, self.alpha, self.gamma, self.reduction, self.eps, self.ignore_index)
+
+class FocalLoss(nn.modules.loss._WeightedLoss):
+    def __init__(self, weight=None, gamma=2,reduction='mean'):
+        super(FocalLoss, self).__init__(weight,reduction=reduction)
+        self.gamma = gamma
+        # self.weight = torch.FloatTensor([0.2, 0.8]) #weight parameter will act as the alpha parameter to balance class weights
+        self.weight = weight
+
+    def forward(self, input, target):
+        # print(input.dtype, target.dtype, self.weight.dtype)
+        ce_loss = F.cross_entropy(input, target.long(),reduction=self.reduction,weight=self.weight)
+        pt = torch.exp(-ce_loss)
+        focal_loss = ((1 - pt) ** self.gamma * ce_loss).mean()
+        return focal_loss
+
+
 def kor_reg(mdl, lamb=1.0):
     # Consider the below facotrs.
     # factor1: which kind layer (e.g., original(stem), pointwise, depthwise, fc_layer)
