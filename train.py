@@ -43,6 +43,7 @@ from utils.data_utils import get_cuda_memory_usage
 from utils.data_utils import tensor_to_submission_file
 from utils.w4c_dataloader import RainData
 import torchvision.transforms
+from envyaml import EnvYAML
 
 class DataModule(pl.LightningDataModule):
     """ Class to handle training/validation splits in a single object
@@ -246,7 +247,12 @@ def train(params, gpus, mode, checkpoint_path, model=UNetBModel):
 
 def update_params_based_on_args(options):
     config_p = os.path.join('models/configurations',options.config_path)
+    env = EnvYAML(config_p)
+    print("hi!!!!!", env['train']['gamma'], env['train']['loss_weight'])
+    # params = env
     params = load_config(config_p)
+    params['train']['gamma'] = env['train']['gamma']
+    params['train']['loss_weight'] = env['train']['loss_weight']
     
     if options.name != '':
         print(params['experiment']['name'])

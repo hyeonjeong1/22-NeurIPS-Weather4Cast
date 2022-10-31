@@ -959,7 +959,7 @@ class UNetBottle(nn.Module):
         
         self.region_clf = nn.Linear(outs*4, 3)
         self.sigmoid = nn.Sigmoid()
-        self.softmax = nn.Softmax()
+        self.softmax = nn.Softmax(dim=1)
         
         self.dropout = nn.Dropout3d(0.2)  ## read this from config!
         self.apply(self.weight_init)

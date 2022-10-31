@@ -29,11 +29,11 @@ dataset:
     RATE:
       rainfall_rate-500X500: 
         mask: [-9999000.0, inf, nan, max128] #, 0range0.1] # Mostly used for loss function: values added here are added to a mask and not used for loss 
-        map: []   #Mostly used for input preprocessing   # 1. map values 
+        map: [[-8888000.0, 0], [-9999000.0, 0], [inf, 0], [nan, 0]]   #Mostly used for input preprocessing   # 1. map values 
         mean_std: [0.19043082, 0.25199583]
         range: [0, 128]          # 2. we evaluate only pixels in this range
         standardise: False       # 3. use log(x+1) instead & normalize (x/max)
-        bin: False     
+        bin: True     
   preprocess_HRIT:  # 1: map values, 2: normalise in range per variable if process==True
     #  # var mean sd min median max length
     #  1 IR_016 0.06605569 0.09920627 0 0.006609255 1.018736 43718069376 
@@ -105,12 +105,13 @@ dataset:
     
 train:    # model training settings
   batch_size: 6
-  max_epochs: 5
+  max_epochs: 1
   n_workers: 8  # 8
   loss: FocalLoss
-  loss_weight: [0.12, 0.88]
+  loss_weight: [$WEIGHT, 1]
+  gamma: $GAMMA
   pos_weight: 6.114572
-  early_stopping: False
+  early_stopping: True
   patience: 5
   lr: 1e-5
   weight_decay: 0

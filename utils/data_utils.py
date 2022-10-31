@@ -423,15 +423,6 @@ def preprocess_fn(x, preprocess, verbose=False):
                 less_v = float(q.partition('lessthan')[2])
                 x[x<less_v] = v
         else:  x[x==q] = v
-    
-    ## 1' Map values by categorical bin
-    if len(preprocess['map'])==0:
-      # bins = np.arange(0,128, 1.0)
-      # for i, j in enumerate(bins):
-      #   x[np.where((x>=j) & (x<(j+0.02)))] = i
-      x[np.where(x < 0.001)] = 0
-      x[np.where(x >= 0.001)] = 1
-      if verbose: print(1, np.unique(x, return_counts=True))
 
     # 2 Clip values out of range
     m, M = preprocess['range']
@@ -491,8 +482,10 @@ def preprocess_OPERA(x, preprocess, verbose=False):
         x = x - mean
         x = x/stdev
     if preprocess['bin']: 
-        bins = np.arange(0,128, 1.0)
-        x = np.digitize(x, bins) - 1
+        # bins = np.arange(0,128, 1.0)
+        # x = np.digitize(x, bins) - 1    
+        x[np.where(x < 0.001)] = 0
+        x[np.where(x >= 0.001)] = 1
     if VERBOSE: print(3, np.unique(x, return_counts=True), x.shape)
     return x
 
