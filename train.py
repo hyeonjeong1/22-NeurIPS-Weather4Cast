@@ -26,7 +26,7 @@ import argparse
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.plugins import DDPPlugin
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, ConcatDataset
 from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 import datetime
@@ -51,14 +51,24 @@ class DataModule(pl.LightningDataModule):
         if mode in ['train']:
             self.train_ds = RainData('training', **self.params)
             self.val_ds = RainData('validation', **self.params)
+            if params['distill']:
+                ("Using Validation and Test as Train!")
+                print("train length: ", self.train_ds.__len__())
+                print("val length: ", self.val_ds.__len__())
+                self.train_ds = ConcatDataset([self.train_ds, self.val_ds])
+                print("after concat: ", self.train_ds.__len__())
         if mode in ['val']:
             self.val_ds = RainData('validation', **self.params)    
         if mode in ['predict']:    
             self.test_ds = RainData('test', **self.params)
 
     def __load_dataloader(self, dataset, shuffle=True, pin=True):
+        if shuffle:
+            batch_size = self.training_params['batch_size']
+        else:
+            batch_size = 60
         dl = DataLoader(dataset, 
-                        batch_size=self.training_params['batch_size'],
+                        batch_size=batch_size,
                         num_workers=self.training_params['n_workers'],
                         shuffle=shuffle, pin_memory=pin, prefetch_factor=2,
                         persistent_workers=True)
@@ -91,7 +101,7 @@ def get_trainer(gpus,params):
      """
     max_epochs=params['train']['max_epochs'];
     print("Trainig for",max_epochs,"epochs");
-    checkpoint_callback = ModelCheckpoint(monitor='val_loss_epoch', save_top_k=3, save_last=True,
+    checkpoint_callback = ModelCheckpoint(monitor='val_loss_epoch', save_top_k= 10, save_last=None,
                                           filename='{epoch:02d}-{val_loss_epoch:.6f}')
     
     paralel_training = None
@@ -157,6 +167,10 @@ def train(params, gpus, mode, checkpoint_path, model=UNetBModel):
     get_cuda_memory_usage(gpus)
     data = DataModule(params['dataset'], params['train'], mode)
     model = load_model(model, params, checkpoint_path)
+    
+    if params['distill']:
+        model.distillation()
+    
     if params['logging']:
         wandb.watch(model)
     # ------------
@@ -211,6 +225,7 @@ def update_params_based_on_args(options):
         params['experiment']['name'] = options.name
     
     params['logging'] = options.logging
+    params['distill'] = options.distill
     return params
     
 def set_parser():
@@ -230,6 +245,7 @@ def set_parser():
     parser.add_argument("-l", "--logging", action='store_true',
                         help="wandb logging true or not")
     parser.add_argument("--freeze", action='store_true', help='transfer freeze')
+    parser.add_argument("--distill", action='store_true', help='distill')
 
     return parser
 

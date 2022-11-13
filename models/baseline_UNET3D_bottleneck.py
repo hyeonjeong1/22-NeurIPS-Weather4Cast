@@ -40,6 +40,9 @@ from torch import nn
 from torch.utils.checkpoint import checkpoint
 from torch.nn import functional as F
 
+import einops
+from einops import rearrange, repeat
+from einops.layers.torch import Rearrange
 
 def get_conv(dim=3):
     """Chooses an implementation for a convolution layer."""
@@ -241,7 +244,8 @@ class DownConv(nn.Module):
         )
         self.conv2 = conv3(
             self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
-        )
+        ) # how about 1x1 conv?
+        
         
         self.conv3 = conv1(
             self.out_channels, self.out_channels, dim=dim
@@ -290,9 +294,12 @@ class DownConv(nn.Module):
         y =  self.dropout(y)
         y += identity
         y = self.act2(y)
+        y = self.se(y)
         before_pool = y
         y = self.pool(y)
-        before_pool = self.conv3(before_pool)
+        # before_pool = self.se(before_pool)
+        
+        before_pool = self.act3(self.norm2(self.conv3(before_pool)))
         if self.transfer:
             # before_pool = self.act3(self.norm2(before_pool))
             # before_pool = self.se(before_pool)
@@ -402,7 +409,7 @@ class UpConv(nn.Module):
         if self.merge_mode == 'concat':
             self.conv1 = conv3(
                 2*self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
-            )
+            ) # how about conv 1x1
         else:
             # num of input channels to conv2 is same
             self.conv1 = conv3(
@@ -952,7 +959,13 @@ class UNetBottle(nn.Module):
         self.reduce_channels = conv1(outs*4, ## 4= experiment / len_seq_in
                                      self.out_channels, dim=dim)
         
-        self.region_clf = nn.Linear(outs*4, 3)
+        self.region_conditioners = nn.ModuleList()
+        self.conditioner = nn.ModuleList()
+        for i in range(n_blocks):
+            self.conditioner.append(RegionConditioner())
+            self.region_conditioners.append(ConditionWithRegion(
+                regions=7, hidden_dim=self.start_filts * (2**i) * 2, num_feature_maps=self.start_filts * (2**i)))
+        
         self.sigmoid = nn.Sigmoid()
         self.softmax = nn.Softmax()
         
@@ -970,13 +983,24 @@ class UNetBottle(nn.Module):
     
     
 
-    def forward(self, x):
+    def forward(self, x, r_idx, r_idx_b=None, lam=None):
+        if r_idx_b != None:
+            r_idx_label = nn.functional.one_hot(r_idx, num_classes=7).type(torch.FloatTensor)
+            r_idx_b_label = nn.functional.one_hot(r_idx_b, num_classes=7).type(torch.FloatTensor)
+            r_idx = lam * r_idx_label + (1-lam) * r_idx_b_label
+        else:
+            r_idx = nn.functional.one_hot(r_idx, num_classes=7).type(torch.FloatTensor)
+        
+
         encoder_outs = []
 
         # Encoder pathway, save outputs for merging
         i = 0  # Can't enumerate because of https://github.com/pytorch/pytorch/issues/16123
         for module in self.down_convs:
             x, before_pool = module(x)
+            coditioner_layer = self.conditioner[i]
+            scale, bias = self.region_conditioners[i](before_pool, r_idx)
+            before_pool = coditioner_layer(before_pool, scale, bias)
             before_pool =  self.dropout(before_pool)  # for skip connections
             encoder_outs.append(before_pool)
             i += 1
@@ -994,10 +1018,6 @@ class UNetBottle(nn.Module):
         xs = x.shape;
         x = torch.reshape(x,(xs[0],xs[1]*xs[2],1,xs[3],xs[4]));
         
-        x_ = F.adaptive_avg_pool3d(x, 1)
-        x_ = x_.reshape(xs[0], -1)
-        reg = self.softmax(self.region_clf(x_))
-        
         if VERBOSE: print("pre-reduce",x.shape)
         x = self.reduce_channels(x)
         if VERBOSE: print("post-reduce",x.shape)
@@ -1008,7 +1028,7 @@ class UNetBottle(nn.Module):
         #  receptive field estimation using fornoxai/receptivefield:
         # self.feature_maps = [x]  # Currently disabled to save memory
         
-        return x, reg
+        return x
 
     @torch.jit.unused
     def forward_gradcp(self, x):
@@ -1029,6 +1049,27 @@ class UNetBottle(nn.Module):
         # self.feature_maps = [x]  # Currently disabled to save memory
         return x
 
+class RegionConditioner(nn.Module):
+    """
+    'FiLM: Visual Reasoning with a General Conditioning Layer'
+    Paper: https://arxiv.org/pdf/1709.07871.pdf
+    """
+
+    def forward(self, x: torch.Tensor, scale: torch.Tensor, bias: torch.Tensor) -> torch.Tensor:
+        """
+        Add the conditioning to the input tensor
+        Args:
+            x: Input tensor
+            scale: Scale parameter
+            bias: Bias parameter
+        Returns:
+            Input tensor with the scale multiplied to it and bias added
+        """
+        scale = scale.unsqueeze(2).unsqueeze(3).unsqueeze(4).expand_as(x)
+        bias = bias.unsqueeze(2).unsqueeze(3).unsqueeze(4).expand_as(x)
+
+        return (scale * x) + bias
+    
 
 def test_model(
     batch_size=1,
@@ -1109,6 +1150,293 @@ def test_planar_configs(max_n_blocks=4):
         for p in planar_combinations:
             print(f'Testing 3D U-Net with n_blocks = {n_blocks}, planar_blocks = {p}...')
             test_model(n_blocks=n_blocks, planar_blocks=p)
+
+
+class Transformer(nn.Module):
+    def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout = 0.):
+        super().__init__()
+        self.layers = nn.ModuleList([])
+        self.norm = nn.LayerNorm(dim)
+        for _ in range(depth):
+            self.layers.append(nn.ModuleList([
+                PreNorm(dim, Attention(dim, heads = heads, dim_head = dim_head, dropout = dropout)),
+                PreNorm(dim, FeedForward(dim, mlp_dim, dropout = dropout))
+            ]))
+
+    def forward(self, x):
+        for attn, ff in self.layers:
+            x = attn(x) + x
+            x = ff(x) + x
+        return self.norm(x)
+
+
+def _stack_tups(tuples, stack_dim=1):
+    "Stack tuple of tensors along `stack_dim`"
+    return tuple(
+        torch.stack([t[i] for t in tuples], dim=stack_dim) for i in list(range(len(tuples[0])))
+    )
+
+
+class TimeDistributed(nn.Module):
+    '''Applies `module` over `tdim` identically for each step,
+    use `low_mem` to compute one at a time.'''
+
+    def __init__(self, module, low_mem=False, tdim=1):
+        super().__init__()
+        self.module = module
+        self.low_mem = low_mem
+        self.tdim = tdim
+
+    def forward(self, *tensors, **kwargs):
+        "input x with shape:(bs,seq_len,channels,width,height)"
+        if self.low_mem or self.tdim != 1:
+            return self.low_mem_forward(*tensors, **kwargs)
+        else:
+            # only support tdim=1
+            inp_shape = tensors[0].shape
+            bs, seq_len = inp_shape[0], inp_shape[1]
+            out = self.module(*[x.view(bs * seq_len, *x.shape[2:]) for x in tensors], **kwargs)
+        return self.format_output(out, bs, seq_len)
+
+    def low_mem_forward(self, *tensors, **kwargs):
+        "input x with shape:(bs,seq_len,channels,width,height)"
+        seq_len = tensors[0].shape[self.tdim]
+        args_split = [torch.unbind(x, dim=self.tdim) for x in tensors]
+        out = []
+        for i in range(seq_len):
+            out.append(self.module(*[args[i] for args in args_split]), **kwargs)
+        if isinstance(out[0], tuple):
+            return _stack_tups(out, stack_dim=self.tdim)
+        return torch.stack(out, dim=self.tdim)
+
+    def format_output(self, out, bs, seq_len):
+        "unstack from batchsize outputs"
+        if isinstance(out, tuple):
+            return tuple(out_i.view(bs, seq_len, *out_i.shape[1:]) for out_i in out)
+        return out.view(bs, seq_len, *out.shape[1:])
+
+    def __repr__(self):
+        return f"TimeDistributed({self.module})"
+
+
+class Residual(nn.Module):
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+    def forward(self, x, **kwargs):
+        return self.fn(x, **kwargs) + x
+
+class PreNorm(nn.Module):
+    def __init__(self, dim, fn):
+        super().__init__()
+        self.norm = nn.LayerNorm(dim)
+        self.fn = fn
+    def forward(self, x, **kwargs):
+        return self.fn(self.norm(x), **kwargs)
+
+class FeedForward(nn.Module):
+    def __init__(self, dim, hidden_dim, dropout = 0.):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, dim),
+            nn.Dropout(dropout)
+        )
+    def forward(self, x):
+        return self.net(x)
+
+class Attention(nn.Module):
+    def __init__(self, dim, heads = 8, dim_head = 64, dropout = 0.):
+        super().__init__()
+        inner_dim = dim_head *  heads
+        project_out = not (heads == 1 and dim_head == dim)
+
+        self.heads = heads
+        self.scale = dim_head ** -0.5
+
+        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
+
+        self.to_out = nn.Sequential(
+            nn.Linear(inner_dim, dim),
+            nn.Dropout(dropout)
+        ) if project_out else nn.Identity()
+
+    def forward(self, x):
+        b, n, _, h = *x.shape, self.heads
+        qkv = self.to_qkv(x).chunk(3, dim = -1)
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), qkv)
+
+        dots = einsum('b h i d, b h j d -> b h i j', q, k) * self.scale
+
+        attn = dots.softmax(dim=-1)
+
+        out = einsum('b h i j, b h j d -> b h i d', attn, v)
+        out = rearrange(out, 'b h n d -> b n (h d)')
+        out =  self.to_out(out)
+        return out
+
+
+class ReAttention(nn.Module):
+    def __init__(self, dim, heads = 8, dim_head = 64, dropout = 0.):
+        super().__init__()
+        inner_dim = dim_head *  heads
+        self.heads = heads
+        self.scale = dim_head ** -0.5
+
+        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
+
+        self.reattn_weights = nn.Parameter(torch.randn(heads, heads))
+
+        self.reattn_norm = nn.Sequential(
+            Rearrange('b h i j -> b i j h'),
+            nn.LayerNorm(heads),
+            Rearrange('b i j h -> b h i j')
+        )
+
+        self.to_out = nn.Sequential(
+            nn.Linear(inner_dim, dim),
+            nn.Dropout(dropout)
+        )
+
+    def forward(self, x):
+        b, n, _, h = *x.shape, self.heads
+        qkv = self.to_qkv(x).chunk(3, dim = -1)
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), qkv)
+
+        # attention
+
+        dots = einsum('b h i d, b h j d -> b h i j', q, k) * self.scale
+        attn = dots.softmax(dim=-1)
+
+        # re-attention
+
+        attn = einsum('b h i j, h g -> b g i j', attn, self.reattn_weights)
+        attn = self.reattn_norm(attn)
+
+        # aggregate and out
+
+        out = einsum('b h i j, b h j d -> b h i d', attn, v)
+        out = rearrange(out, 'b h n d -> b n (h d)')
+        out =  self.to_out(out)
+        return out
+
+class LeFF(nn.Module):
+    def __init__(self, dim = 192, scale = 4, depth_kernel = 3):
+        super().__init__()
+        scale_dim = dim*scale
+        self.up_proj = nn.Sequential(nn.Linear(dim, scale_dim),
+                                    Rearrange('b n c -> b c n'),
+                                    nn.BatchNorm1d(scale_dim),
+                                    nn.GELU(),
+                                    Rearrange('b c (h w) -> b c h w', h=14, w=14)
+                                    )
+        self.depth_conv =  nn.Sequential(nn.Conv2d(
+            scale_dim, scale_dim, kernel_size=depth_kernel,
+            padding=1, groups=scale_dim, bias=False),
+                          nn.BatchNorm2d(scale_dim),
+                          nn.GELU(),
+                          Rearrange('b c h w -> b (h w) c', h=14, w=14)
+                          )
+
+        self.down_proj = nn.Sequential(nn.Linear(scale_dim, dim),
+                                    Rearrange('b n c -> b c n'),
+                                    nn.BatchNorm1d(dim),
+                                    nn.GELU(),
+                                    Rearrange('b c n -> b n c')
+                                    )
+
+    def forward(self, x):
+        x = self.up_proj(x)
+        x = self.depth_conv(x)
+        x = self.down_proj(x)
+        return x
+
+
+class LCAttention(nn.Module):
+    def __init__(self, dim, heads = 8, dim_head = 64, dropout = 0.):
+        super().__init__()
+        inner_dim = dim_head *  heads
+        project_out = not (heads == 1 and dim_head == dim)
+
+        self.heads = heads
+        self.scale = dim_head ** -0.5
+
+        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
+
+        self.to_out = nn.Sequential(
+            nn.Linear(inner_dim, dim),
+            nn.Dropout(dropout)
+        ) if project_out else nn.Identity()
+
+    def forward(self, x):
+        b, n, _, h = *x.shape, self.heads
+        qkv = self.to_qkv(x).chunk(3, dim = -1)
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), qkv)
+        q = q[:, :, -1, :].unsqueeze(2) # Only Lth element use as query
+
+        dots = einsum('b h i d, b h j d -> b h i j', q, k) * self.scale
+
+        attn = dots.softmax(dim=-1)
+
+        out = einsum('b h i j, b h j d -> b h i d', attn, v)
+        out = rearrange(out, 'b h n d -> b n (h d)')
+        out =  self.to_out(out)
+        return out
+
+class ConditionWithRegion(nn.Module):
+    """Compute Scale and bias for conditioning on region"""
+
+    def __init__(
+        self,
+        regions: int,
+        hidden_dim: int,
+        num_feature_maps: int
+    ):
+        """
+        Compute the scale and bias factors for
+        conditioning convolutional blocks on the forecast time
+        Args:
+            forecast_steps: Number of forecast steps
+            hidden_dim: Hidden dimension size
+            num_feature_maps: Max number of channels in the blocks,
+            to generate enough scale+bias values
+            This means extra values will be generated, but keeps implementation simpler
+        """
+        super().__init__()
+        self.forecast_steps = regions
+        self.num_feature_maps = num_feature_maps
+        self.lead_time_network = nn.ModuleList(
+            [
+                nn.Linear(in_features=self.forecast_steps, out_features=hidden_dim),
+                nn.Linear(in_features=hidden_dim, out_features=2* num_feature_maps),
+            ]
+        )
+
+    def forward(self, x: torch.Tensor, region: int) -> [torch.Tensor, torch.Tensor]:
+        """
+        Get the scale and bias for the conditioning layers
+        From the FiLM paper, each feature map (i.e. channel) has its own scale and bias layer,
+        so needs a scale and bias for each feature map to be generated
+        Args:
+            x: The Tensor that is used
+            timestep: Index of the timestep to use, between 0 and forecast_steps
+        Returns:
+            2 Tensors of shape (Batch, num_feature_maps)
+        """
+        # One hot encode the timestep
+        # lead time
+        device = next(self.lead_time_network.parameters()).device
+        regionsteps = region.to(device)
+
+        for layer in self.lead_time_network:
+            regionsteps = layer(regionsteps)
+        scales_and_biases = regionsteps
+        scales_and_biases = einops.rearrange(
+            scales_and_biases, "b (block sb) -> b block sb", block=self.num_feature_maps, sb=2
+        )
+        return scales_and_biases[:,:,0],scales_and_biases[:,:,1]
 
 
 if __name__ == '__main__':

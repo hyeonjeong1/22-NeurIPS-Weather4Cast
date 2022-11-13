@@ -49,6 +49,7 @@ class UNetBottle_Lightning(pl.LightningModule):
         self.transfer = params['transfer']
         self.model = Base_UNET3D(in_channels=self.in_channels,start_filts =  self.start_filts, transfer = self.transfer)
         
+        
         if params['freeze'] == True: 
             self.freeze()
 
@@ -67,7 +68,9 @@ class UNetBottle_Lightning(pl.LightningModule):
         self.cutmix_prob = params['cutmix_p']
         self.masking = False
         self.mask_p = 0.9
-
+        self.teacher = None
+        self.distill = params['distill']
+        
         pos_weight = torch.tensor(params['pos_weight']);
         if VERBOSE: print("Positive weight:",pos_weight);
 
@@ -103,7 +106,14 @@ class UNetBottle_Lightning(pl.LightningModule):
         #     self.test_log[i-1].flush()
         #     self.test_cf[i-1].write('tn\tf\nfp\ntp')
         #     self.test_cf[i-1].flush()
-        
+    
+    def distillation(self):
+        print("distillation")
+        self.teacher = copy.deepcopy(self.model)
+        for _, m in self.teacher.named_modules():
+            for _, p in m.named_parameters():
+                p.requires_grad = False
+    
         
     def freeze(self):
         """ freeze the model without film_layer and final_layer"""
@@ -123,11 +133,14 @@ class UNetBottle_Lightning(pl.LightningModule):
         metric_placeholder = {self.main_metric: -1}
         self.logger.log_hyperparams(self.hparams, metric_placeholder)
         
-    def forward(self, x):
-        x, reg = self.model(x)
-        #if self.loss =='BCELoss':
-        #x = self.relu(x)
-        return x, reg
+    def forward(self, x, r_idx=None, r_idx_b=None, lam=None, phase='val'):
+        if phase == 'train':
+            x = self.model(x, r_idx, r_idx_b, lam)
+        else:
+            x = self.model(x, r_idx)
+
+            
+        return x
 
     def retrieve_only_valid_pixels(self, x, m):
         """ we asume 1s in mask are invalid pixels """
@@ -154,7 +167,7 @@ class UNetBottle_Lightning(pl.LightningModule):
         return loss
     
     
-    def _compute_loss(self, y_hat, y, agg=True, mask=None, reg=None, r_idx=None, mode='train'):
+    def _compute_loss(self, y_hat, y, agg=True, mask=None, mode='train'):
         if mask is not None:
             y_hat = self.retrieve_only_valid_pixels(y_hat, mask)
             y = self.retrieve_only_valid_pixels(y, mask)
@@ -162,7 +175,7 @@ class UNetBottle_Lightning(pl.LightningModule):
         # print(y_hat.shape, y_hat.min(), y_hat.max())
         # print(y.shape, y.min(), y.max())
         if agg:
-            loss = self.loss_fn(y_hat, y, reg, r_idx, mode=mode)
+            loss = self.loss_fn(y_hat, y, mode=mode)
         else:
             loss = self.loss_fn(y_hat, y, reduction='none', mode=mode)
         return loss
@@ -178,7 +191,11 @@ class UNetBottle_Lightning(pl.LightningModule):
         index = torch.randperm(batch_size)
 
         mixed_x = lam * x + (1 - lam) * x[index]
-        y_a, y_b = y, y[index]
+        
+        if self.distill:
+            y_a, y_b = self.teacher(x)[0], self.teacher(x[index])[0]
+        else:
+            y_a, y_b = y, y[index]
         r_idx_a, r_idx_b = r_idx, r_idx[index]
         
         metadata_a = metadata
@@ -217,23 +234,25 @@ class UNetBottle_Lightning(pl.LightningModule):
         
         return x, y, metadata
     
-    def _mixup_criterion(self, y_hat, y_a, y_b, reg, r_idx_a, r_idx_b, lam, agg=True, mask_a=None, mask_b=None):
+    def _mixup_criterion(self, y_hat, y_a, y_b, lam, agg=True, mask_a=None, mask_b=None):
         if mask_a is not None:
-            y_hat_a = self.retrieve_only_valid_pixels(y_hat, mask_a)
-            y_a = self.retrieve_only_valid_pixels(y_a, mask_a)
+            # y_hat_a = self.retrieve_only_valid_pixels(y_hat, mask_a)
+            # y_a = self.retrieve_only_valid_pixels(y_a, mask_a)
+            y_hat_a = y_hat
         else:
             y_hat_a = y_hat
 
         if mask_b is not None:
-            y_hat_b = self.retrieve_only_valid_pixels(y_hat, mask_b)
-            y_b = self.retrieve_only_valid_pixels(y_b, mask_b)
+            # y_hat_b = self.retrieve_only_valid_pixels(y_hat, mask_b)
+            # y_b = self.retrieve_only_valid_pixels(y_b, mask_b)
+            y_hat_b = y_hat
         else:
             y_hat_b = y_hat
         
         if agg:
-            loss = lam * self.loss_fn(y_hat_a, y_a, reg, r_idx_a) + (1 - lam) * self.loss_fn(y_hat_b, y_b, reg, r_idx_b)
+            loss = lam * self.loss_fn(y_hat_a, y_a, distill = self.distill) + (1 - lam) * self.loss_fn(y_hat_b, y_b, distill = self.distill)
         else:
-            loss = lam * self.loss_fn(y_hat_a, y_a, reg, r_idx_a, reduction='none') + (1 - lam) * self.loss_fn(y_hat_b, y_b, reg, r_idx_b, reduction='none')
+            loss = lam * self.loss_fn(y_hat_a, y_a, reduction='none', distill = self.distill) + (1 - lam) * self.loss_fn(y_hat_b, y_b, reduction='none', distill = self.distill)
             
         return loss
 
@@ -251,31 +270,31 @@ class UNetBottle_Lightning(pl.LightningModule):
         
         if VERBOSE:
             print('x', x.shape, 'y', y.shape, '----------------- batch')
-        y_hat, reg = self.forward(x)
+        y_hat = self.forward(x, r_idx_a, r_idx_b, lam, phase=phase)
         if VERBOSE:
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
         mask_a = self.get_target_mask(metadata_a)
         mask_b = self.get_target_mask(metadata_b)
         
         if self.masking:
-            tmp = torch.rand(mask_a.shape, device=mask_a.device) > self.mask_p
+            tmp = torch.rand(mask_a.shape, device=mask_a.device) < self.mask_p
             tmp[y == 1] = 0
             mask_a = mask_a + tmp
             del tmp
             
-            tmp = torch.rand(mask_b.shape, device=mask_b.device) > self.mask_p
+            tmp = torch.rand(mask_b.shape, device=mask_b.device) < self.mask_p
             tmp[y == 1] = 0
             mask_b = mask_b + tmp
             del tmp
             
         
         if self.mixup == 'mixup':
-            loss = self._mixup_criterion(y_hat, y_a, y_b, reg, r_idx_a, r_idx_b, lam, mask_a=mask_a, mask_b=mask_b)
+            loss = self._mixup_criterion(y_hat, y_a, y_b, lam, mask_a=mask_a, mask_b=mask_b)
         else: # cutmix also uses this loss function
             loss = self._compute_loss(y_hat, y, mask=mask)
         
         if not self.transfer:
-            loss += kor_reg(self.model)
+            loss += 0.1 * kor_reg(self.model, device = mask_a.device)
             
         self.log(f'{phase}_loss', loss,batch_size=self.bs)
         return loss
@@ -287,13 +306,12 @@ class UNetBottle_Lightning(pl.LightningModule):
         
         if VERBOSE:
             print('x', x.shape, 'y', y.shape, '----------------- batch')
-        y_hat, reg = self.forward(x)
+        y_hat = self.forward(x, r_idx)
         mask = self.get_target_mask(metadata)
         if VERBOSE:
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
 
-        loss = self._compute_loss(y_hat, y, mask=mask, reg=reg, r_idx=r_idx, mode='valid')
-#         loss = self._compute_valid_loss(y_hat, y, mask=mask)
+        loss = self._compute_loss(y_hat, y, mask=mask, mode='valid')
 
         # todo: add the same plot as in `test_step`
 
@@ -314,13 +332,7 @@ class UNetBottle_Lightning(pl.LightningModule):
         recall, precision, F1, acc, csi = recall_precision_f1_acc(y, y_hat)
         if self.params['logging']:
             logs = write_temporal_recall_precision_f1_acc(y.squeeze(), y_hat.squeeze(),32)
-        
-        # for i in range(self.start_filts):
-        #     self.valid_log[i].write(logs['log'][i])
-        #     self.valid_cf[i].write(logs['cf'][i])
-        #     self.valid_log[i].flush()
-        #     self.valid_cf[i].flush()
-            
+
         iou = iou_class(y_hat, y)
 
         #LOGGING
@@ -338,14 +350,14 @@ class UNetBottle_Lightning(pl.LightningModule):
 
 
     def test_step(self, batch, batch_idx, phase='test'):
-        x, y, metadata = batch
+        x, y, metadata, r_idx = batch
         if VERBOSE:
             print('x', x.shape, 'y', y.shape, '----------------- batch')
-        y_hat = self.forward(x)
+        y_hat = self.forward(x, r_idx)
         mask = self.get_target_mask(metadata)
         if VERBOSE:
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
-        loss = self._compute_loss(y_hat, y, mask=mask)
+        loss = self._compute_loss(y_hat, y, mask=mask, mode='valid')
         ## todo: add the same plot as in `test_step`
         if self.loss=="BCEWithLogitsLoss":
             print("applying thresholds to y_hat logits")
@@ -379,7 +391,7 @@ class UNetBottle_Lightning(pl.LightningModule):
 
     def predict_step(self, batch, batch_idx, phase='predict'):
         x, y, metadata, r_idx = batch
-        y_hat, reg = self.model(x)
+        y_hat = self.model(x, r_idx)
         mask = self.get_target_mask(metadata)
         if VERBOSE:
             print('y_hat', y_hat.shape, 'y', y.shape, '----------------- model')
@@ -390,7 +402,8 @@ class UNetBottle_Lightning(pl.LightningModule):
             y_hat[idx_gt0] = 1
             y_hat[~idx_gt0] = 0
         elif self.loss=='DiceBCE' or self.loss == 'DiceLoss':
-            idx_gt0 = y_hat>= 0
+            idx_gt0 = y_hat>= 0 # -0.4, -0.62
+            print(F.sigmoid(y_hat))
             y_hat[idx_gt0] = 1
             y_hat[~idx_gt0] = 0
         return y_hat
@@ -447,7 +460,7 @@ class UNetBottle_Lightning(pl.LightningModule):
         optimizer = torch.optim.AdamW(optim_groups,
                                      lr=float(self.params["lr"]))
         
-        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=1.0)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
         return [optimizer], [scheduler]
 
     def seq_metrics(self, y_true, y_pred):
@@ -509,33 +522,41 @@ class DiceLoss(nn.Module):
 class DiceBCELoss(nn.Module):
     def __init__(self, weight=None, size_average=True):
         super(DiceBCELoss, self).__init__()
+        self.bcelogits = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(6.114572))
 
-    def forward(self, inputs, targets, reg, r_idx, smooth=1, mode='train'):
-        
-        r_idx_label = nn.functional.one_hot(r_idx, num_classes=3)
-
-        
-        #comment out if your model contains a sigmoid or equivalent activation layer
-        inputs = F.sigmoid(inputs)       
+    def forward(self, inputs, targets, smooth=1, mode='train', distill=False):
         
         #flatten label and prediction tensors
         inputs = inputs.view(-1)
         targets = targets.view(-1)
+        tau = 1
         
+        if distill:
+            scale = tau **2 if tau >1. else tau
+            BCE = - scale * torch.mean(F.sigmoid(targets) * F.logsigmoid(inputs/tau) + (1-F.sigmoid(targets)) * torch.log(1-F.sigmoid(inputs/tau)))
+        
+        #comment out if your model contains a sigmoid or equivalent activation layer
+        inputs = F.sigmoid(inputs)  
+        if distill:
+            targets = F.sigmoid(targets)
+        
+        # if not distill:
         intersection = (inputs * targets).sum()                            
         dice_loss = 1 - (2.*intersection + smooth)/(inputs.sum() + targets.sum() + smooth)  
-        reg_loss = F.binary_cross_entropy(reg.to(torch.float32), r_idx_label.to(torch.float32), reduction='mean')
-        BCE =  F.binary_cross_entropy(inputs, targets, reduction='mean') # + 0.1 * F.binary_cross_entropy(inputs, 1-targets, reduction='mean')
+
+        if not distill:
+            BCE =  F.binary_cross_entropy(inputs, targets, reduction='mean') # + 0.1 * F.binary_cross_entropy(inputs, 1-targets, reduction='mean')
 
         if mode == 'valid':
             return dice_loss
         else:
-            Dice_BCE =  0.9 * BCE + 1.1 * dice_loss # + 0.5* reg_loss
+            loss = F.binary_cross_entropy(inputs, targets, reduction='mean') + dice_loss
+            # loss = self.bcelogits(inputs, targets) + dice_loss
         
-            return Dice_BCE 
+            return loss 
 
         
-def kor_reg(mdl, lamb=1.0):
+def kor_reg(mdl, device, lamb=1.0):
     # Consider the below facotrs.
     # factor1: which kind layer (e.g., original(stem), pointwise, depthwise, fc_layer)
     # factor2: power of regularization (i.e., lambda). Maybe, we should differ from each class of layer's lambda.
@@ -546,10 +567,13 @@ def kor_reg(mdl, lamb=1.0):
     
     l2_reg = None
 
-    for module in mdl.modules():
+    for name, module in mdl.named_modules():
+        if 'condition' in name:
+            continue
+            
         if isinstance(module, nn.Conv3d) or isinstance(module, nn.Linear):
             if isinstance(module, nn.Conv3d):
-                if module.weight.shape[2] == 1:
+                if module.weight.shape[3] == 1:
                     # pointwise conv
                     W = module.weight
             elif isinstance(module, nn.Linear):
@@ -563,10 +587,10 @@ def kor_reg(mdl, lamb=1.0):
             wt = torch.transpose(w1, 0, 1)
             if W.shape[0]< W.shape[1]:
                 m = torch.matmul(wt, w1)
-                ident = Variable(torch.eye(cols, cols)).cuda()
+                ident = Variable(torch.eye(cols, cols)).to(m.device)
             else:
                 m = torch.matmul(w1, wt)
-                ident = Variable(torch.eye(m.shape[0], m.shape[0])).cuda()
+                ident = Variable(torch.eye(m.shape[0], m.shape[0])).to(m.device)
    
             
             w_tmp = m-ident

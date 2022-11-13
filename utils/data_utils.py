@@ -36,7 +36,7 @@ VERBOSE = False
 
 #__________________________________________________CREATING/LOADING SAMPLE IDS____________________________________________________
 
-def load_sample_ids(data_split, splits_df, len_seq_in, len_seq_predict, regions, generate_pkl, path=''): 
+def load_sample_ids(data_split, splits_df, len_seq_in, len_seq_predict, regions, generate_pkl, years, path=''): 
     """For loading the sample idxs of the dataset. If a pkl file is found, it will be loaded. If not, it will be generated. 
     If you want to save a .pkl file, set generate_pkl to True in the yaml file.
 
@@ -52,13 +52,19 @@ def load_sample_ids(data_split, splits_df, len_seq_in, len_seq_predict, regions,
     Returns:
         dict: A dictionary of the sample idxs.
     """
-    if generate_pkl: 
-        idxs_r = generate_and_cache_sequences(data_split, splits_df, len_seq_in, len_seq_predict, regions, path)
-    elif '.pkl' in path: # read pre-computed (fastest)
-        print("load_sample_ids using pkl cache:",path);
-        idxs_r = read_samples_ids(path, data_split)
-    else: 
-        idxs_r = generate_sample_ids(data_split, splits_df, len_seq_in, len_seq_predict, regions)
+    
+    print("|YEARS]", years)
+    # if generate_pkl: 
+    #     idxs_r = generate_and_cache_sequences(data_split, splits_df, len_seq_in, len_seq_predict, regions, path)
+    # elif '.pkl' in path: # read pre-computed (fastest)
+    #     print("load_sample_ids using pkl cache:",path);
+    #     idxs_r = read_samples_ids(path, data_split)
+    # else: 
+    #     idxs_r = generate_sample_ids(data_split, splits_df, len_seq_in, len_seq_predict, regions)
+    
+    idxs_r = generate_sample_ids(
+        data_split, splits_df, len_seq_in, len_seq_predict, regions, years
+    )
     return idxs_r
         
 def generate_and_cache_sequences(split, splits_df, len_seq_in, len_seq_predict, regions, path_name):
@@ -79,7 +85,9 @@ def generate_and_cache_sequences(split, splits_df, len_seq_in, len_seq_predict, 
     samples = {'training': [], 'validation': [], 'test': []}
             
     for data_split in ['training', 'validation', 'test']:
-        idxs = generate_sample_ids(data_split, splits_df, len_seq_in, len_seq_predict, regions)
+        idxs = generate_sample_ids(
+            data_split, splits_df, len_seq_in, len_seq_predict, regions, years
+        )
         samples[data_split] = idxs
         if VERBOSE: print(f"{len(idxs)} {data_split} samples")
     
@@ -104,7 +112,7 @@ def read_samples_ids(path, data_split):
         loaded_dict = pickle.load(f)
         return loaded_dict[data_split]
 
-def generate_sample_ids(data_split, splits_df, len_seq_in, len_seq_predict, regions):
+def generate_sample_ids(data_split, splits_df, len_seq_in, len_seq_predict, regions, years):
     """generates sample idxs for a given data split 
 
     Args:
@@ -118,24 +126,24 @@ def generate_sample_ids(data_split, splits_df, len_seq_in, len_seq_predict, regi
         list: list of sample idxs for a specific data split
     """    
     if data_split == "training":
-        idxs_r = get_training_idxs(splits_df, len_seq_in, len_seq_predict, data_split,regions[0])
+        idxs_r = get_training_idxs(splits_df, len_seq_in, len_seq_predict, data_split,regions[0], years)
         for r in range(1, len(regions)): #append rest of regions to df ])
-            idxs = get_training_idxs(splits_df, len_seq_in, len_seq_predict, data_split,regions[r])
+            idxs = get_training_idxs(splits_df, len_seq_in, len_seq_predict, data_split,regions[r], years)
             idxs_r = idxs_r + idxs
         
     elif data_split == 'validation': # Validation/Testing/Heldout Data
-        idxs_r = get_validation_idxs(splits_df, len_seq_in, len_seq_predict, data_split, regions[0])
+        idxs_r = get_validation_idxs(splits_df, len_seq_in, len_seq_predict, data_split, regions[0], years)
         for r in range(1, len(regions)): #append rest of regions to df 
-                    idxs = get_validation_idxs(splits_df, len_seq_in, len_seq_predict, data_split, regions[r])
+                    idxs = get_validation_idxs(splits_df, len_seq_in, len_seq_predict, data_split, regions[r], years)
                     idxs_r = idxs_r + idxs
     else: #testing
-        idxs_r = get_test_heldout_idxs(splits_df, len_seq_in, data_split, regions[0])
+        idxs_r = get_test_heldout_idxs(splits_df, len_seq_in, data_split, regions[0], years)
         for r in range(1, len(regions)): #append rest of regions to df 
-                    idxs = get_test_heldout_idxs(splits_df, len_seq_in, data_split, regions[r])
+                    idxs = get_test_heldout_idxs(splits_df, len_seq_in, data_split, regions[r], years)
                     idxs_r = idxs_r + idxs
     return idxs_r
 
-def get_training_idxs(df, len_seq_in, len_seq_predict, data_split, region):
+def get_training_idxs(df, len_seq_in, len_seq_predict, data_split, region, years):
     """get sample idxs for training data split
 
     Args:
@@ -152,6 +160,15 @@ def get_training_idxs(df, len_seq_in, len_seq_predict, data_split, region):
    
     df = df[df['split'] == data_split]
     df = df[df['all_vars'] == 1]
+    
+    dfs= pd.DataFrame(columns = df.columns);
+
+    print("years //// ", years)
+    for year in years:
+        dfs=pd.concat([dfs,df[df['date'].dt.year==int(year)]]);
+    if VERBOSE:
+        print(f"Keeping {dfs.shape[0]} {data_split} rows of {df.shape[0]} for {region} in {years}");
+    df=dfs;
 
     #non testing 
     for i in range(df.shape[0] - len_seq_in - len_seq_predict + 1):
@@ -181,6 +198,13 @@ def get_test_heldout_idxs(df, len_seq_in, data_split, region):
     split_type = f"{data_split}_in"
     df = df[df['split_type'] == split_type]
     df = df[df['all_vars'] == 1]
+    
+    dfs= pd.DataFrame(columns = df.columns);
+    for year in years:
+        dfs=pd.concat([dfs,df[df['date'].dt.year==int(year)]]);
+    if VERBOSE:
+        print(f"Keeping {dfs.shape[0]} {data_split} rows of {df.shape[0]} for {region} in {years}");
+    df=dfs;
 
     for start_index in range(0,df.shape[0], len_seq_in):
         in_seq = [start_index + i for i in range(len_seq_in)]
@@ -189,7 +213,7 @@ def get_test_heldout_idxs(df, len_seq_in, data_split, region):
     return idxs
         
     
-def get_validation_idxs(df, len_seq_in, len_seq_out, data_split, region): 
+def get_validation_idxs(df, len_seq_in, len_seq_out, data_split, region, years): 
     """get sample idxs for validation data split
 
     Args:
@@ -206,6 +230,13 @@ def get_validation_idxs(df, len_seq_in, len_seq_out, data_split, region):
     split_type = f"{data_split}_in"
     df = df[df['split'] == data_split]
     df = df[df['all_vars'] == 1]
+    
+    dfs= pd.DataFrame(columns = df.columns);
+    for year in years:
+        dfs=pd.concat([dfs,df[df['date'].dt.year==int(year)]]);
+    if VERBOSE:
+        print(f"Keeping {dfs.shape[0]} {data_split} rows of {df.shape[0]} for {region} in {years}");
+    df=dfs;
 
     for i in range(df.shape[0]):
         if df.iloc[i]['split_type'] == split_type:
@@ -248,7 +279,7 @@ def get_io_validation_times(df, start_index, len_seq_in, len_seq_predict, region
 
 #______________________________________LOADING DATA_______________________________________
 
-def load_dataset(root, data_split, regions, product): 
+def load_dataset(root, data_split, regions, years, product): 
     """load dataset from root folder and return as list
 
     Args:
@@ -264,21 +295,40 @@ def load_dataset(root, data_split, regions, product):
     if data_split == "validation":  data_split = "val"
     elif data_split == "training": data_split = "train"
 
-    if product == "RATE": 
-        for region in regions:
-            file = f'{region}.{data_split}.rates.crop.h5'
-            path = f'{root}/OPERA/{file}' 
-            f = h5py.File(path, 'r')
-            ds = f['rates.crop']
-            dataset[region] = ds
-    else: 
-        for region in regions:
-            file = f'{region}.{data_split}.reflbt0.ns.h5'
-            path = f'{root}/HRIT/{file}' 
-            f = h5py.File(path, 'r')
-            
-            ds = f['REFL-BT']
-            dataset[region] = ds
+    if VERBOSE:
+        print(f"Data split {data_split}")
+        print(f"Regions {regions}")
+        print(f"Years {years}")
+        print(f"Product {product}")
+
+    for region in regions:
+        if VERBOSE: print(f"Region: {region}")
+        yearly_records = {}
+        for year in years:
+            if VERBOSE: print(f"Year: {year}")
+            if product == "RATE":
+                file = f"{region}.{data_split}.rates.crop.h5"
+                path = f"{root}/{year}/OPERA/{file}"
+                f = h5py.File(path, "r")
+                ds = f["rates.crop"]
+                yearly_records[year] = ds
+                # f.close()
+            else:
+                file = f"{region}.{data_split}.reflbt0.ns.h5"
+                path = f"{root}/{year}/HRIT/{file}"
+                f = h5py.File(path, "r")
+                ds = f["REFL-BT"]
+                yearly_records[year]  = ds
+                # f.close()
+                # close file memory leak?
+                # when done reading, close files?
+
+        if VERBOSE: print(f"Done reading {region}... skipping concatenation")
+        dataset[region] = yearly_records
+
+    if VERBOSE: print(f"{data_split} Data read ... returning to dataset.)")
+    if VERBOSE: print(f"Read {len(dataset)} regions, with each containing {len(dataset[list(dataset.keys())[0]])} years.")
+
     return dataset
 
 def get_sequence(seq, root, data_split, region, product, bands, preprocess=None, swap_time_ch=False, ds=None):
@@ -307,6 +357,7 @@ def get_sequence(seq, root, data_split, region, product, bands, preprocess=None,
         mask_seq.append(masks)
     #return format - time x channels x width x height
     mask_seq = np.asarray(mask_seq)
+    prod_seq = np.asarray(prod_seq)
 
     # Swapping Axes to give shape  channels x time x width x height 
     if swap_time_ch:
@@ -363,17 +414,15 @@ def get_file(sample_id, root, data_split, region, product, bands, preprocess=Non
     return x, masks
 
 def read_file(sample_id, ds, region):
-    """read single timepoint file
-
-    Args:
-        sample_id (int): sample id to read
-        ds (numpy array): dataset to read from
-        region (String): region to read from
-
-    Returns:
-        numpy array: data for single timepoint
-    """    
-    return ds[region][sample_id]
+    previous_year_samples = 0
+    for year in ds[region]:
+        # print(sample_id, previous_year_samples)
+        i = sample_id - previous_year_samples;
+        if i < len(ds[region][year]):
+            return ds[region][year][i]
+        previous_year_samples += len(ds[region][year])
+    
+    raise Exception(f"Sample {sample_id} not found for {region}")
 
 #___________________PREPROCESSING FUNCTIONS_______________________________________
 

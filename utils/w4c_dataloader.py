@@ -27,6 +27,7 @@ from torch.utils.data import Dataset
 import os
 import time
 from timeit import default_timer as timer
+import sys
 
 from utils.data_utils import *
 
@@ -49,7 +50,7 @@ class RainData(Dataset):
                  len_seq_in=4, len_seq_predict=32,
                  regions=[], regions_def={}, generate_samples=False,
                  latlon_path='', altitudes_path='', 
-                 splits_path=None, swap_time_ch=False,
+                 splits_path=None, swap_time_ch=False,years=None,
                  **kwargs):
         start = timer()
         # Data Dimensions 
@@ -72,6 +73,7 @@ class RainData(Dataset):
         self.generate_samples = generate_samples
         self.path_to_sample_ids = path_to_sample_ids
         self.swap_time_ch = swap_time_ch
+        self.years = years
         
          # data splits to load (training/validation/test)
         self.root = project_root
@@ -81,12 +83,12 @@ class RainData(Dataset):
         # prepare all elements to load - sample idx will use the object 'self.idx'            
         self.idxs = load_sample_ids(self.data_split, self.splits_df,
                                     self.len_seq_in, self.len_seq_predict, self.regions,
-                                    self.generate_samples, self.path_to_sample_ids) 
+                                    self.generate_samples, self.years, self.path_to_sample_ids) 
 
         #LOAD DATASET 
-        self.in_ds = load_dataset(self.data_root, self.data_split, self.regions, self.input_product)
+        self.in_ds = load_dataset(self.data_root, self.data_split, self.regions, years, self.input_product)
         if self.data_split not in ['test', 'heldout']:
-            self.out_ds = load_dataset(self.data_root, self.data_split, self.regions, self.output_product)
+            self.out_ds = load_dataset(self.data_root, self.data_split, self.regions, years, self.output_product)
         else: 
             self.out_ds = []
             
@@ -94,8 +96,12 @@ class RainData(Dataset):
           "boxi_0015": 0,
           "boxi_0034": 1,
           "boxi_0076": 2,
+          "roxi_0004": 3,
+          "roxi_0005": 4,
+          "roxi_0006": 5,
+          "roxi_0007": 6
         }
-        
+
     def __len__(self):
         """ total number of samples (sequences of in:4-out:1 in our case) to train """
         #print(len(self.idxs), "-------------------", self.data_split)
@@ -114,11 +120,10 @@ class RainData(Dataset):
     def load_out(self, out_seq, seq_r, metadata): 
         t1=time.time()
          #GROUND TRUTH (OUTPUT)
-        if self.data_split not in ['test', 'heldout']: 
+        if self.data_split not in ['test', 'heldout']:# ['test', 'heldout']: 
             output_data, out_masks = get_sequence(out_seq, self.data_root, self.data_split, seq_r, 
                                                   self.output_product, [], self.preprocess_target, self.swap_time_ch, self.out_ds)
-
-            # collapse time to channels    
+            # collapse time to channels
             metadata['target']['mask'] = out_masks
         else: #Just return [] if its test/heldout data
             output_data = np.array([])
