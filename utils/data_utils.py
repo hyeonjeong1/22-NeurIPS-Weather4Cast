@@ -180,7 +180,7 @@ def get_training_idxs(df, len_seq_in, len_seq_predict, data_split, region, years
 
 
 
-def get_test_heldout_idxs(df, len_seq_in, data_split, region):
+def get_test_heldout_idxs(df, len_seq_in, data_split, region, years):
     """get sample idxs for test data split
 
     Args:
