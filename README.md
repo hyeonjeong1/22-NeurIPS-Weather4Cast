@@ -1,10 +1,8 @@
 # [Weather4cast](https://www.iarai.ac.at/weather4cast/)  - Super-Resolution Rain Movie Prediction under Spatio-Temporal Shifts
+This repository contains the source code for the paper, [Region-Conditioned Orthogonal 3D U-Net for Weather4Cast Competition](https://arxiv.org/abs/2212.02059) by Taehyeon Kim, Shinhwan Kang, Hyeonjeong Shin, Deukryeol Yoon, Seongha Eom, Kijung Shin, Se-Young Yun, published at NeurIPS 2022 Workshop - Competition Track on Weather4Cast.
 - Predict super-resolution rain movies  in various regions of Europe
 - Transfer learning across space and time under strong shifts
 - Exploit data fusion to model ground-radar and multi-band satellite images
-
-## Our Paper
-You can check our paper at this [link](https://arxiv.org/abs/2212.02059).
 
 ## Contents
 [Weather4cast: Super-Resolution Rain Movie Prediction under Spatio-Temporal Shifts](#weather4cast-multi-sensor-weather-forecasting-competition--benchmark-dataset)
