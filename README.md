@@ -3,6 +3,9 @@
 - Transfer learning across space and time under strong shifts
 - Exploit data fusion to model ground-radar and multi-band satellite images
 
+## Our Paper
+You can check our paper at this [link](https://arxiv.org/abs/2212.02059).
+
 ## Contents
 [Weather4cast: Super-Resolution Rain Movie Prediction under Spatio-Temporal Shifts](#weather4cast-multi-sensor-weather-forecasting-competition--benchmark-dataset)
   - [Contents](#contents)
@@ -227,6 +230,3 @@ The competition is organized by:
 - [Silesian University of Technology, Poland](https://polsl.pl)
 - [European Space Agency Φ-lab, Italy](https://philab.phi.esa.int/)
 - [Spanish State Meteorological Agency, AEMET, Spain](http://aemet.es/)
-# 22-Neurips-Competition-Baseline
-# 22-Neurips-Competition-Baseline
-# 22-Neurips-Competition-Baseline
